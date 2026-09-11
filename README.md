@@ -132,28 +132,26 @@ wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存、脚本装的
 
 > 节点域名必须是 **DNS-only（灰云）**。三个协议都不是 HTTP，套 CDN 会全部失效。
 
-### 同机安装面板和节点
+### 面板和节点一起装
 
-一台服务器同时跑面板和节点时，使用下面的一键命令。它会先安装面板；面板上线后，在网页的
-**节点 → 新增**创建节点并复制一次性接入 token，回到终端粘贴即可继续安装节点：
-
-```bash
-wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh | \
-  sudo sh -s -- --domain panel.example.com --email you@example.com
-```
-
-非交互环境可直接提供 token。`--panel` 默认是 `https://<面板域名>`；只有该节点要使用
-AnyTLS 时才需要 `--node-domain`（以及可选的 `--cf-token`）：
+同一台机器上同时跑面板和节点时，用一个脚本搞定：
 
 ```bash
-I=https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh
-wget -qO- "$I" | sudo sh -s -- \
-  --domain panel.example.com --token '<node-token>' \
-  --node-domain node.example.com
+wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-all.sh | sh
 ```
 
-同机运行时，面板占用 `80` 和 `443`；为该节点新建 Reality 入站时请选择其他端口。节点仍然
-通过 WebSocket 主动连接面板，不会额外开放控制端口。
+会问域名、管理员账号、节点名；没有终端的话设 `SKYSBX_ADMIN_USER` 和
+`SKYSBX_ADMIN_PASSWORD` 跳过。节点那边的 Cloudflare token 通过 `--cf-token`
+传入，有了才能签 AnyTLS 证书（certbot standalone 要 80，被面板占着，DNS-01
+不需要端口）。
+
+参数透传给 `deploy/install-all.sh`：
+
+```bash
+wget -qO- $P | sh -s -- --domain panel.example.com --email you@example.com --cf-token <token>
+```
+
+装完之后两边各归各的 installer 管，互不干扰。
 
 ### 离线 / 自建镜像
 

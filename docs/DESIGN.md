@@ -67,7 +67,7 @@ Authorization: Bearer <node-token>
 ```
 
 `node-token` 在 panel 建节点时生成，**一次性显示，只存哈希**。没有证书交换，没有密钥
-派生。token 可以随时在节点页「换 token」。存的是 SHA-256 而不是 bcrypt，理由见 §11.1
+派生。token 可以随时在节点页「换 token」。存的是 SHA-256 而不是 bcrypt，理由见 §12.1
 —— 那不是省事，是一个未认证端点上的拒绝服务。
 
 ### 2.3 消息封装
@@ -176,7 +176,7 @@ CREATE TABLE users (
 CREATE TABLE nodes (
   id            INTEGER PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  token_hash    TEXT NOT NULL,              -- 接入 token 的 bcrypt，历史遗留，见 §11.1
+  token_hash    TEXT NOT NULL,              -- 接入 token 的 bcrypt，历史遗留，见 §12.1
   token_sha     TEXT UNIQUE,                -- 同一个 token 的 SHA-256，认证实际查这个
   address       TEXT NOT NULL,              -- 客户端连的地址（域名或 IP）
   country       TEXT NOT NULL DEFAULT 'XX',
@@ -683,7 +683,25 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 - **登出不使 cookie 失效**（已修复）：会话签名载荷现在包含世代号（`settings.web.session_generation`），登出时递增。旧 cookie 因世代号不匹配而被拒绝。测试：`internal/web/session_generation_test.go`（2 个用例）。
 - **首次 setup 窗口**（已修复）：面板首次启动时写入一个 10 分钟的 deadline（`settings.web.setup_deadline`），过期后 `/setup` 返回 403。一键安装因在启动前创建 admin 而不受影响。测试：`internal/web/setup_window_test.go`（5 个用例）。
 
-## 12. 工程约束
+## 12. 单节点一起安装
+
+`deploy/install-all.sh`（根目录还有 `install-all.sh` 作为管道入口）把面板和节点装到
+同一台机器上，整个过程一次交互：
+
+- 管理员在第一个问题里给出，两个子安装器共享同一个值，不会再问第二遍。
+- 面板先装好；脚本轮询 `https://$DOMAIN/login` 直到 ACME 证书签发完毕。
+- 拿到证书后用管理员登录面板的 HTTP API，POST `/nodes` 创建这条机器的节点记录，
+  从返回的 HTML 里把 token 解出来，交给节点安装器。
+- 节点端 `--domain` 和 `--cf-token` 一起传；没有 Cloudflare token 就走 Reality 和
+  Shadowsocks，AnyTLS 的证书拿不到（certbot standalone 要 80，被面板占着）。
+- 安装完之后两边各归各的 installer 管：`--upgrade`、`--uninstall`、`--purge` 都
+  不在这里封装，因为"卸载"对一个有数据库的面板和对一个有证书的节点含义不同，
+  一个 flag 同时做两件是丢数据的捷径。
+
+两个仓库必须都能克隆（面板从 `skysbx-panel`，节点从 `skysbx-node`），所以前提
+条件和 `install.sh` 一样 —— DNS 解析到位、80/443 空闲、root。
+
+## 13. 工程约束
 
 | 约束 | 说明 |
 |---|---|
@@ -699,7 +717,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 
 ---
 
-## 13. 已知限制
+## 14. 已知限制
 
 按能不能修分类，不按重要性：
 
@@ -722,7 +740,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 
 ---
 
-## 14. 许可
+## 15. 许可
 
 - panel：AGPL-3.0
 - node：GPL-3.0
