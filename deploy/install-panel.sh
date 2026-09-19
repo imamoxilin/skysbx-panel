@@ -588,7 +588,7 @@ fi
 
 if [ "$NEED_ADMIN" = yes ]; then
     LOGIN_LINE="登录    https://${DOMAIN}/login   用户名 ${ADMIN_USER}"
-    NEXT_LINE="下一步：登录面板，添加一个节点，复制它的接入 token。"
+    NEXT_LINE="下一步：登录面板，添加一个节点，复制它的接入令牌。"
 else
     LOGIN_LINE="登录    https://${DOMAIN}/login"
     NEXT_LINE="下一步：登录面板。忘了密码？${ROOT}/skysbx-panel -db ${ROOT}/skysbx.db -set-admin <用户名>"

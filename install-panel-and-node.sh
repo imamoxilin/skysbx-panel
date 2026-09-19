@@ -25,12 +25,12 @@ REF=${SKYSBX_REF:-main}
 
 RED=$(printf '\033[31m'); GRN=$(printf '\033[32m'); RST=$(printf '\033[0m')
 say() { printf '%s==>%s %s\n' "$GRN" "$RST" "$*"; }
-die() { printf '%s fail%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
+die() { printf '%s 错误%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 
-[ "$(id -u)" = 0 ] || die "run as root"
+[ "$(id -u)" = 0 ] || die "请用 root 运行"
 
 if ! command -v git >/dev/null 2>&1; then
-    say "installing git"
+    say "正在安装 git"
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq && apt-get install -y -qq git
     elif command -v dnf >/dev/null 2>&1; then
@@ -38,15 +38,15 @@ if ! command -v git >/dev/null 2>&1; then
     elif command -v yum >/dev/null 2>&1; then
         yum install -y -q git
     else
-        die "install git first"
+        die "请先安装 git"
     fi
 fi
 
 SRC=$(mktemp -d)
 trap 'rm -rf "$SRC"' EXIT
-say "fetching $REPO@$REF"
+say "正在获取 $REPO@$REF"
 git clone -q --branch "$REF" --depth 1 "$REPO" "$SRC/skysbx-panel" \
-    || die "cannot clone $REPO"
+    || die "无法克隆 $REPO"
 
 # A pipeline leaves stdin pointing at the downloaded script rather than the
 # terminal, and this installer has questions to ask. Reattach the terminal if
@@ -56,7 +56,7 @@ git clone -q --branch "$REF" --depth 1 "$REPO" "$SRC/skysbx-panel" \
 # bash, not sh: this launcher is POSIX because it is piped into whatever /bin/sh
 # is, but what it hands over to is bash — on Debian /bin/sh is dash, which fails
 # on the first line with "Illegal option -o pipefail".
-command -v bash >/dev/null 2>&1 || die "bash is required"
+command -v bash >/dev/null 2>&1 || die "需要 bash"
 if ( exec 3>/dev/tty ) 2>/dev/null; then
     exec bash "$SRC/skysbx-panel/deploy/install-panel-and-node.sh" "$@" </dev/tty
 fi

@@ -260,7 +260,12 @@ case "${1:-}" in
         # Naming the half is what makes this scriptable; leaving it out is what
         # needs a terminal, because that is when there is a question to ask.
         if [ -z "$half" ] && have_panel && have_node && ! [ -t 0 ]; then
-            die "要对哪一半执行 $action？这台机器两半都装了，而当前没有终端可以询问"
+            case "$action" in
+                upgrade)   action_cn=升级 ;;
+                uninstall) action_cn=卸载 ;;
+                purge)     action_cn=清除 ;;
+            esac
+            die "要对哪一半执行 $action_cn？这台机器两半都装了，而当前没有终端可以询问"
         fi
         lifecycle "$action" "$half"
         exit 0 ;;

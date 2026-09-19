@@ -59,7 +59,7 @@ usage() {
   --email <邮箱>       Let's Encrypt 联系邮箱                  [不给会询问]
   --node-name <名称>   本机节点记录的名称                      [默认 local]
   --node-domain <域名> 客户端访问这个节点用的域名              [默认同 --domain]
-  --token <token>      跳过自动创建，直接用这个接入 token。只在面板无法为我们
+  --token <token>      跳过自动创建，直接用这个接入令牌。只在面板无法为我们
                        创建时才需要；正常情况下脚本会自己登录面板并建好节点。
   --cf-token <token>   Cloudflare API token。不给的话节点拿不到自己的证书 ——
                        certbot 的 standalone 模式需要 80 端口，而面板占着它。
@@ -99,7 +99,7 @@ say "环境检查"
 if systemctl is-enabled --quiet skysbx-panel 2>/dev/null; then
     die "这台机器上已经装了面板。
   本脚本用于全新的机器。要给已有的面板添加节点，请先在面板里创建该节点，
-  再用它的接入 token 运行节点安装器。"
+  再用它的接入令牌 运行节点安装器。"
 fi
 
 command -v curl >/dev/null || { apt-get update -qq; apt-get install -y -qq curl; }
@@ -213,7 +213,7 @@ SKYSBX_ADMIN_USER="$ADMIN_USER" SKYSBX_ADMIN_PASSWORD="$ADMIN_PASS" \
 NODE_DOMAIN=${NODE_DOMAIN:-$DOMAIN}
 
 if [ -n "$TOKEN" ]; then
-    ok "使用 --token 提供的接入 token"
+    ok "使用 --token 提供的接入令牌"
 else
     say "正在为本机创建节点记录"
     COOKIE=$(mktemp)
@@ -275,15 +275,15 @@ else
         # none of those are a reason to abandon a panel that is installed and
         # running. Fall back to the thing a human would have done anyway.
         warn "无法自动创建节点记录"
-        printf '  请到 https://%s/nodes 创建节点，然后把它的接入 token 粘贴到这里。\n' "$DOMAIN"
+        printf '  请到 https://%s/nodes 创建节点，然后把它的接入令牌 粘贴到这里。\n' "$DOMAIN"
         if [ -t 0 ]; then
             printf '  token: '
             read -r TOKEN || TOKEN=""
         fi
-        [ -n "$TOKEN" ] || die "没有节点接入 token，也没有终端可以询问。
+        [ -n "$TOKEN" ] || die "没有节点接入令牌，也没有终端可以询问。
   面板已经装好并在运行。请手动完成：到 https://$DOMAIN/nodes 创建节点，
   然后带 --token <token> 重新运行本脚本（已完成的步骤会跳过）。"
-        ok "使用你粘贴的 token"
+        ok "使用你粘贴的接入令牌"
     fi
 fi
 
