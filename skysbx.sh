@@ -156,8 +156,8 @@ menu() {
         printf '  2  Upgrade\n'
         printf '  3  Uninstall      %skeeps the data%s\n' "$DIM" "$RST"
         printf '  4  Purge          %sdeletes the data%s\n' "$DIM" "$RST"
-        have_panel || printf '  5  Add a node here\n'
-        have_node  || printf '  5  Add the panel here\n'
+        have_panel || printf '  5  Add the panel here\n'
+        have_node  || printf '  5  Add a node here\n'
     fi
     printf '  0  Quit\n\n  > '
 
@@ -178,7 +178,9 @@ menu() {
             2) lifecycle upgrade ;;
             3) lifecycle uninstall ;;
             4) lifecycle purge ;;
-            5) have_panel && node || panel ;;
+            # An if, not `have_panel && node || panel`: that runs the panel
+            # installer as well whenever the node installer exits non-zero.
+            5) if have_panel; then node; else panel; fi ;;
             0|"") say "nothing done" ;;
             *) die "no such choice: $choice" ;;
         esac
