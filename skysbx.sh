@@ -78,12 +78,18 @@ show_version() {
 # nothing to ask. On a host with both, never assume: "uninstall" means a
 # database to one half and a certificate to the other, and doing both because
 # the answer was obvious to the script is how a database goes missing.
+# Prompts go to the terminal, not to stdout: the caller reads this function's
+# stdout to learn which half was chosen, so anything printed there is swallowed
+# into that variable instead of being shown. Asking a question nobody can see is
+# worse than not asking.
 pick_half() {
     action=$1
     if have_panel && have_node; then
-        printf '\n  Both halves are installed here. %s which?\n' "$action"
-        printf '    1  panel\n    2  node\n    0  cancel\n'
-        printf '  > '
+        {
+            printf '\n  Both halves are installed here. %s which?\n' "$action"
+            printf '    1  panel\n    2  node\n    0  cancel\n'
+            printf '  > '
+        } >/dev/tty
         read -r h </dev/tty || h=0
         case "$h" in
             1) echo panel ;;
