@@ -17,6 +17,10 @@ FROM_SOURCE=0
 # Empty means whatever the newest release is. Pin it to reinstall the exact
 # version a working host is already running.
 SKYSBX_VERSION=${SKYSBX_VERSION:-}
+# A checkout whatever invoked us already had. Not the same as --src: this only
+# says "reuse this if you end up building", where --src says "build this and do
+# not look for a published binary".
+LAUNCHER_SRC=${SKYSBX_LAUNCHER_SRC:-}
 
 RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLD=$'\e[1m'; RST=$'\e[0m'
 say()  { printf '%s==>%s %s\n' "$BLD" "$RST" "$*"; }
@@ -357,6 +361,11 @@ elif [ -n "$SRC_DIR" ]; then
     rm -rf "$BUILD/skysbx-panel"
     cp -a "$SRC_DIR" "$BUILD/skysbx-panel"
     ok "using $SRC_DIR"
+elif [ -n "$LAUNCHER_SRC" ] && [ -d "$LAUNCHER_SRC" ]; then
+    say "sources"
+    rm -rf "$BUILD/skysbx-panel"
+    cp -a "$LAUNCHER_SRC" "$BUILD/skysbx-panel"
+    ok "reusing the clone the launcher made"
 else
     say "sources"
     URL="https://github.com/${GH_OWNER}/skysbx-panel.git"

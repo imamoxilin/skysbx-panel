@@ -30,7 +30,9 @@ NODE_DOMAIN=""
 CF_TOKEN=""
 TOKEN=""
 PANEL_SRC=""
+PANEL_SRC_GIVEN=0
 NODE_SRC=""
+NODE_SRC_GIVEN=0
 
 RED=$(printf '\033[31m'); GRN=$(printf '\033[32m'); YLW=$(printf '\033[33m')
 BLD=$(printf '\033[1m');  RST=$(printf '\033[0m')
@@ -82,8 +84,8 @@ while [ $# -gt 0 ]; do
         --node-domain) NODE_DOMAIN=$2; shift 2 ;;
         --token)      TOKEN=$2; shift 2 ;;
         --cf-token)   CF_TOKEN=$2; shift 2 ;;
-        --panel-src)  PANEL_SRC=$2; shift 2 ;;
-        --node-src)   NODE_SRC=$2; shift 2 ;;
+        --panel-src)  PANEL_SRC=$2; PANEL_SRC_GIVEN=1; shift 2 ;;
+        --node-src)   NODE_SRC=$2; NODE_SRC_GIVEN=1; shift 2 ;;
         -h|--help)    usage; exit 0 ;;
         *)            usage; die "unknown argument: $1" ;;
     esac
@@ -184,9 +186,14 @@ fi
 say "installing the panel"
 PANEL_ARGS=(--domain "$DOMAIN")
 [ -n "$EMAIL" ] && PANEL_ARGS+=(--email "$EMAIL")
-[ -n "$PANEL_SRC" ] && PANEL_ARGS+=(--src "$PANEL_SRC")
+# --src only when the operator named a checkout. PANEL_SRC is otherwise just
+# the clone this script is running from, and passing that as --src tells the
+# installer never to look for a published binary — which is how the download
+# path ended up unreachable from here even though both halves supported it.
+[ "$PANEL_SRC_GIVEN" = 1 ] && PANEL_ARGS+=(--src "$PANEL_SRC")
 
 SKYSBX_ADMIN_USER="$ADMIN_USER" SKYSBX_ADMIN_PASSWORD="$ADMIN_PASS" \
+    SKYSBX_LAUNCHER_SRC="$PANEL_SRC" \
     bash "$PANEL_INSTALLER" "${PANEL_ARGS[@]}" </dev/null
 
 # ──────────────────────────── the node's token ────────────────────────────
@@ -276,7 +283,9 @@ fi
 
 say "installing the node"
 NODE_ARGS=(--panel "https://$DOMAIN" --token "$TOKEN")
-[ -n "$NODE_SRC" ] && NODE_ARGS+=(--src "$NODE_SRC")
+# Same distinction as the panel above: a checkout we cloned ourselves is not an
+# instruction to build.
+[ "$NODE_SRC_GIVEN" = 1 ] && NODE_ARGS+=(--src "$NODE_SRC")
 # --domain only alongside --cf-token. Passing it without one would send certbot
 # at port 80, which the panel is holding, and the only result would be a
 # confusing failure in the middle of an otherwise good install.
@@ -285,7 +294,7 @@ if [ -n "$CF_TOKEN" ]; then
     [ -n "$EMAIL" ] && NODE_ARGS+=(--email "$EMAIL")
 fi
 
-bash "$NODE_INSTALLER" "${NODE_ARGS[@]}" </dev/null
+SKYSBX_LAUNCHER_SRC="$NODE_SRC" bash "$NODE_INSTALLER" "${NODE_ARGS[@]}" </dev/null
 
 # ───────────────────────────────── summary ────────────────────────────────
 

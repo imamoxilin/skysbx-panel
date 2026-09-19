@@ -56,6 +56,13 @@ git clone -q --branch "$REF" --depth 1 "$REPO" "$SRC/skysbx-panel" \
 # is, but the installer it hands over to is bash — on Debian /bin/sh is dash,
 # which fails on the first line with "Illegal option -o pipefail".
 command -v bash >/dev/null 2>&1 || die "bash is required"
+# Handed over in the environment, not as --src: this only says "the clone I had
+# to make to find the installer is here, reuse it if you end up building".
+# --src means "build this checkout rather than anything published", which is a
+# different instruction and not one the launcher is entitled to give.
+SKYSBX_LAUNCHER_SRC="$SRC/skysbx-panel"
+export SKYSBX_LAUNCHER_SRC
+
 if ( exec 3>/dev/tty ) 2>/dev/null; then
     exec bash "$SRC/skysbx-panel/deploy/install-panel.sh" "$@" </dev/tty
 fi
