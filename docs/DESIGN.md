@@ -685,7 +685,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 
 ## 12. 单节点一起安装
 
-`deploy/install-all.sh`（根目录还有 `install-all.sh` 作为管道入口）把面板和节点装到
+`deploy/install-panel-and-node.sh`（根目录还有 `install-panel-and-node.sh` 作为管道入口）把面板和节点装到
 同一台机器上，整个过程一次交互：
 
 - 管理员在第一个问题里给出，两个子安装器共享同一个值，不会再问第二遍。

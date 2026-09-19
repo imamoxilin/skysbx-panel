@@ -137,17 +137,21 @@ wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存、脚本装的
 同一台机器上同时跑面板和节点时，用一个脚本搞定：
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-all.sh | sh
+wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh | sh
 ```
 
 会问域名、管理员账号、节点名；没有终端的话设 `SKYSBX_ADMIN_USER` 和
-`SKYSBX_ADMIN_PASSWORD` 跳过。节点那边的 Cloudflare token 通过 `--cf-token`
-传入，有了才能签 AnyTLS 证书（certbot standalone 要 80，被面板占着，DNS-01
-不需要端口）。
+`SKYSBX_ADMIN_PASSWORD` 跳过。节点的接入 token **不需要手工复制** —— 面板起来之后
+脚本用刚设好的管理员登录面板，自己建节点记录并取回 token。取不到时（比如面板版本较老）
+会退回来让你粘贴，不会整个装不下去。
 
-参数透传给 `deploy/install-all.sh`：
+节点那边的 Cloudflare token 通过 `--cf-token` 传入，有了才能签 AnyTLS 证书
+（certbot standalone 要 80，被面板占着，DNS-01 不需要端口）。
+
+参数透传给 `deploy/install-panel-and-node.sh`：
 
 ```bash
+P=https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh
 wget -qO- $P | sh -s -- --domain panel.example.com --email you@example.com --cf-token <token>
 ```
 

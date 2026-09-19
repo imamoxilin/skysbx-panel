@@ -26,7 +26,9 @@ ROOT=${SKYSBX_ROOT:-/opt/skysbx}
 DOMAIN=""
 EMAIL=""
 NODE_NAME=""
+NODE_DOMAIN=""
 CF_TOKEN=""
+TOKEN=""
 PANEL_SRC=""
 NODE_SRC=""
 
@@ -54,6 +56,10 @@ Install the skysbx panel and a node on this one host.
   --domain <host>      the panel's domain; must already resolve here   [asked]
   --email <addr>       Let's Encrypt contact                           [asked]
   --node-name <name>   name for this host's node record          [default local]
+  --node-domain <host> the name clients reach this node on   [default --domain]
+  --token <token>      skip minting and use this node join token. Only needed
+                       when the panel cannot mint one for us; normally the
+                       script logs in and creates the node record itself.
   --cf-token <token>   Cloudflare API token. Without one the node gets no
                        certificate, because certbot's standalone mode needs
                        port 80 and the panel is holding it — Reality and
@@ -73,6 +79,8 @@ while [ $# -gt 0 ]; do
         --domain)     DOMAIN=$2; shift 2 ;;
         --email)      EMAIL=$2; shift 2 ;;
         --node-name)  NODE_NAME=$2; shift 2 ;;
+        --node-domain) NODE_DOMAIN=$2; shift 2 ;;
+        --token)      TOKEN=$2; shift 2 ;;
         --cf-token)   CF_TOKEN=$2; shift 2 ;;
         --panel-src)  PANEL_SRC=$2; shift 2 ;;
         --node-src)   NODE_SRC=$2; shift 2 ;;
@@ -97,7 +105,7 @@ fi
 command -v curl >/dev/null || { apt-get update -qq; apt-get install -y -qq curl; }
 command -v git  >/dev/null || apt-get install -y -qq git
 
-# The panel half is this checkout by default: install-all.sh ships inside the
+# The panel half is this checkout by default: install-panel-and-node.sh ships inside the
 # panel repository, so the sources are already here. The node half has to come
 # from somewhere, so clone it unless a checkout was named.
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -183,36 +191,73 @@ SKYSBX_ADMIN_USER="$ADMIN_USER" SKYSBX_ADMIN_PASSWORD="$ADMIN_PASS" \
 
 # ──────────────────────────── the node's token ────────────────────────────
 
-say "creating this host's node record"
-COOKIE=$(mktemp)
+# The name clients will reach this node on. Same host as the panel, so the
+# panel's own domain is the sane default; --node-domain overrides it for the
+# case where the node answers on a second name.
+NODE_DOMAIN=${NODE_DOMAIN:-$DOMAIN}
 
-# The panel answers on 443 the moment it is up, but the certificate arrives
-# over ACME a beat later; --insecure here is about that beat, not about trust —
-# this is a request to localhost's own service, over the loopback of the machine
-# we are already root on.
-for i in $(seq 1 30); do
-    curl -sk --max-time 5 -o /dev/null "https://$DOMAIN/login" && break
-    [ "$i" = 30 ] && die "the panel did not come up at https://$DOMAIN"
-    sleep 2
-done
-ok "panel is answering"
+if [ -n "$TOKEN" ]; then
+    ok "using the node token given with --token"
+else
+    say "creating this host's node record"
+    COOKIE=$(mktemp)
 
-curl -sk -c "$COOKIE" -o /dev/null "https://$DOMAIN/login"
-curl -sk -b "$COOKIE" -c "$COOKIE" -o /dev/null -X POST "https://$DOMAIN/login" \
-    --data-urlencode "username=$ADMIN_USER" \
-    --data-urlencode "password=$ADMIN_PASS"
+    # The panel answers on 443 the moment it is up, but the certificate arrives
+    # over ACME a beat later; --insecure here is about that beat, not about trust —
+    # this is a request to localhost's own service, over the loopback of the machine
+    # we are already root on.
+    for i in $(seq 1 30); do
+        curl -sk --max-time 5 -o /dev/null "https://$DOMAIN/login" && break
+        [ "$i" = 30 ] && die "the panel did not come up at https://$DOMAIN"
+        sleep 2
+    done
+    ok "panel is answering"
 
-# The address a node record carries is what subscriptions hand to clients. On a
-# shared host that is the same name the panel answers on — different ports.
-TOKEN=$(curl -sk -b "$COOKIE" -X POST "https://$DOMAIN/nodes" \
-    --data-urlencode "name=$NODE_NAME" \
-    --data-urlencode "address=$DOMAIN" \
-    --data-urlencode "country=XX" \
-    | sed -n 's/.*<code>\([A-Za-z0-9_-]\{32,\}\)<\/code>.*/\1/p' | head -1)
+    # POST /login is deliberately outside the CSRF gate — there is no session
+    # yet for a token to be bound to — so cookies are all the login needs.
+    curl -sk -c "$COOKIE" -o /dev/null "https://$DOMAIN/login" || true
+    curl -sk -b "$COOKIE" -c "$COOKIE" -o /dev/null -X POST "https://$DOMAIN/login" \
+        --data-urlencode "username=$ADMIN_USER" \
+        --data-urlencode "password=$ADMIN_PASS" || true
 
-[ -n "$TOKEN" ] || die "could not create the node record.
-  The panel is installed and running; finish by hand at https://$DOMAIN/nodes"
-ok "node '$NODE_NAME' created"
+    # Every state-changing route behind a session is CSRF-gated and POST /nodes
+    # is one of them: without this header the panel answers 403 and no token is
+    # ever minted. The value is the skysbx_csrf cookie the login just set — the
+    # same value the rendered form would carry in its hidden field. Read it from
+    # the jar rather than by parsing HTML; HttpOnly entries are stored there too,
+    # just with a marker on the domain column, so the name/value columns hold.
+    CSRF=$(awk '$6 == "skysbx_csrf" { print $7 }' "$COOKIE" 2>/dev/null | tail -1 || true)
+    CSRF_ARGS=()
+    [ -n "$CSRF" ] && CSRF_ARGS=(-H "X-CSRF-Token: $CSRF")
+
+    # The address a node record carries is what subscriptions hand to clients.
+    TOKEN=$(curl -sk -b "$COOKIE" -X POST "https://$DOMAIN/nodes" \
+        ${CSRF_ARGS[@]+"${CSRF_ARGS[@]}"} \
+        --data-urlencode "name=$NODE_NAME" \
+        --data-urlencode "address=$NODE_DOMAIN" \
+        --data-urlencode "country=XX" 2>/dev/null \
+        | sed -n 's/.*<code>\([A-Za-z0-9_-]\{32,\}\)<\/code>.*/\1/p' | head -1 || true)
+
+    if [ -n "$TOKEN" ]; then
+        ok "node '$NODE_NAME' created"
+    else
+        # Minting is a convenience, not the install. A panel too old for this
+        # route, a changed form, a CSRF scheme this script does not know about —
+        # none of those are a reason to abandon a panel that is installed and
+        # running. Fall back to the thing a human would have done anyway.
+        warn "could not create the node record automatically"
+        printf '  Create a node at https://%s/nodes and paste its join token.\n' "$DOMAIN"
+        if [ -t 0 ]; then
+            printf '  token: '
+            read -r TOKEN || TOKEN=""
+        fi
+        [ -n "$TOKEN" ] || die "no node token, and no terminal to ask on.
+  The panel is installed and running. Finish by hand: create a node at
+  https://$DOMAIN/nodes, then re-run this script with
+  --token <token> (everything already done will be skipped)."
+        ok "using the token you pasted"
+    fi
+fi
 
 # ──────────────────────────────── the node ────────────────────────────────
 
@@ -223,7 +268,7 @@ NODE_ARGS=(--panel "https://$DOMAIN" --token "$TOKEN")
 # at port 80, which the panel is holding, and the only result would be a
 # confusing failure in the middle of an otherwise good install.
 if [ -n "$CF_TOKEN" ]; then
-    NODE_ARGS+=(--domain "$DOMAIN" --cf-token "$CF_TOKEN")
+    NODE_ARGS+=(--domain "$NODE_DOMAIN" --cf-token "$CF_TOKEN")
     [ -n "$EMAIL" ] && NODE_ARGS+=(--email "$EMAIL")
 fi
 
