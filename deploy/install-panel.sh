@@ -138,6 +138,12 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
         fi
     fi
 
+    # The shortcut manages both halves, so it goes only when the other one is
+    # not still relying on it.
+    if [ ! -x "$ROOT/skysbx-node" ]; then
+        rm -f /usr/local/bin/skysbx
+    fi
+
     # Shared with the node when both are on one host, so it goes only if this
     # was the last thing in it.
     rmdir "$ROOT/build" 2>/dev/null || true
@@ -537,6 +543,27 @@ systemctl daemon-reload
 systemctl enable -q skysbx-panel
 systemctl restart skysbx-panel
 ok "systemd unit installed"
+
+# The `skysbx` command: the same menu this may well have been started from,
+# left behind so maintenance does not mean remembering a raw.githubusercontent
+# URL. Prefer the copy in the checkout when there is one — a download install
+# has no checkout, and then it comes off the network like everything else.
+#
+# Best effort on purpose. It manages the panel; it is not part of it, and a
+# host that could not fetch one convenience script still has a working panel.
+if [ -f "$BUILD/skysbx-panel/skysbx.sh" ]; then
+    install -m 0755 "$BUILD/skysbx-panel/skysbx.sh" /usr/local/bin/skysbx
+    ok "skysbx command installed"
+elif curl -fsSL --max-time 30 -o /tmp/skysbx.$$ \
+        "https://raw.githubusercontent.com/${GH_OWNER}/skysbx-panel/${REF}/skysbx.sh" \
+     && [ -s /tmp/skysbx.$$ ]; then
+    install -m 0755 /tmp/skysbx.$$ /usr/local/bin/skysbx
+    rm -f /tmp/skysbx.$$
+    ok "skysbx command installed"
+else
+    rm -f /tmp/skysbx.$$
+    warn "could not install the 'skysbx' shortcut; the panel is unaffected"
+fi
 
 printf '    waiting for a certificate '
 CERT_LIVE=0
