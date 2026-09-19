@@ -13,6 +13,10 @@ SRC_DIR=""
 GH_TOKEN=${GITHUB_TOKEN:-}
 GH_OWNER=${SKYSBX_GH_OWNER:-kosje}
 REF=${SKYSBX_REF:-main}
+FROM_SOURCE=0
+# Empty means whatever the newest release is. Pin it to reinstall the exact
+# version a working host is already running.
+SKYSBX_VERSION=${SKYSBX_VERSION:-}
 
 RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLD=$'\e[1m'; RST=$'\e[0m'
 say()  { printf '%s==>%s %s\n' "$BLD" "$RST" "$*"; }
@@ -42,6 +46,7 @@ Install options
   --domain <fqdn>   Panel domain. Must already resolve to this server.
   --email <addr>    Contact address for Let's Encrypt (recommended).
   --src <dir>       Build from a checkout already on disk instead of cloning.
+  --from-source     Build from source instead of downloading a published binary.
   -h, --help        This text.
 
 Ports 80 and 443 must be free: the panel terminates its own TLS and answers the
@@ -58,6 +63,7 @@ while [ $# -gt 0 ]; do
         --domain)    DOMAIN=$2; shift 2 ;;
         --email)     EMAIL=$2; shift 2 ;;
         --src)       SRC_DIR=$2; shift 2 ;;
+        --from-source) FROM_SOURCE=1; shift ;;
         -h|--help)   usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -151,6 +157,15 @@ if [ "$ACTION" = upgrade ]; then
             /etc/systemd/system/skysbx-panel.service | head -1)}
     fi
     [ -n "$DOMAIN" ] || die "cannot tell which domain this panel serves; pass --domain"
+    # A panel installed before --acme-email was written conditionally recorded
+    # the literal string "--db" as its contact, because that is what Go's flag
+    # package took as the value of an empty flag. Reading it back and writing
+    # it out again would rebuild the same broken command line and keep the host
+    # without a certificate through an upgrade that looked like it worked.
+    case "$EMAIL" in
+        -*) warn "ignoring a recorded ACME contact of '$EMAIL' — not an address"
+            EMAIL="" ;;
+    esac
     say "upgrading — domain $DOMAIN"
 fi
 
@@ -280,12 +295,70 @@ GO_MOD_CACHE=$ROOT/go-mod-cache
 GO_BUILD_CACHE=$ROOT/go-build-cache
 install -d -m 0700 "$GO_MOD_CACHE" "$GO_BUILD_CACHE"
 
-say "sources"
-if [ -n "$SRC_DIR" ]; then
+# ─────────────────────────── a published binary ───────────────────────────
+#
+# Compiling takes minutes and, on a small VPS, most of the memory: a cold build
+# cache here was measured leaving 74MB free on a 954MB host. A published build
+# is ~16MB and lands in seconds, so it is what we try first.
+#
+# Tried before the sources are fetched: when it succeeds there is nothing to
+# compile, so there is no reason to have cloned anything.
+#
+# It is a preference, not a requirement. No release yet, an architecture nobody
+# publishes for, a network that cannot reach GitHub's CDN — all of those fall
+# through to building, which is the path that always works. --from-source skips
+# straight to it for anyone who would rather not run a binary they did not
+# build.
+try_release() {
+    [ "$FROM_SOURCE" = 1 ] && return 1
+    [ -n "$SRC_DIR" ] && return 1   # asked for this checkout specifically
+
+    case $(uname -m) in
+        x86_64|amd64)  rel_arch=amd64 ;;
+        aarch64|arm64) rel_arch=arm64 ;;
+        *) return 1 ;;
+    esac
+
+    local base="https://github.com/${GH_OWNER}/skysbx-panel/releases"
+    # GitHub serves the newest release's assets from this path, so resolving a
+    # version through the API — and its rate limit, and its JSON — is avoidable.
+    local from="$base/latest/download"
+    [ -n "$SKYSBX_VERSION" ] && from="$base/download/$SKYSBX_VERSION"
+
+    local tmp; tmp=$(mktemp -d)
+    local asset="skysbx-panel-linux-$rel_arch"
+    say "looking for a published build"
+    if ! curl -fsSL --max-time 120 -o "$tmp/$asset" "$from/$asset" \
+      || ! curl -fsSL --max-time 30 -o "$tmp/SHA256SUMS" "$from/SHA256SUMS"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    # Same rule as the toolchain tarball: nothing unverified gets installed and
+    # run as root. A mismatch is not a reason to fall back quietly — a release
+    # that does not match its own checksums is worth stopping for.
+    if ! ( cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ); then
+        rm -rf "$tmp"
+        die "the published panel binary did not match its checksum.
+  Refusing to install it. Re-run with --from-source to build instead."
+    fi
+    install -m 0755 "$tmp/$asset" "$ROOT/skysbx-panel"
+    rm -rf "$tmp"
+    ok "installed a published build ($rel_arch)"
+    return 0
+}
+
+HAVE_BINARY=0
+try_release && HAVE_BINARY=1
+
+if [ "$HAVE_BINARY" = 1 ]; then
+    :
+elif [ -n "$SRC_DIR" ]; then
+    say "sources"
     rm -rf "$BUILD/skysbx-panel"
     cp -a "$SRC_DIR" "$BUILD/skysbx-panel"
     ok "using $SRC_DIR"
 else
+    say "sources"
     URL="https://github.com/${GH_OWNER}/skysbx-panel.git"
     rm -rf "$BUILD/skysbx-panel"
     # The token goes in a per-command header, not in the URL: git writes the
@@ -355,23 +428,25 @@ ensure_go() {
     ok "go $GO_VERSION ready"
 }
 
-ensure_go
+if [ "$HAVE_BINARY" = 0 ]; then
+    ensure_go
 
-# Stamped into the binary so `--version` can answer what is running without
-# anyone reading a build log.
-VER=$(git -C "$BUILD/skysbx-panel" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    # Stamped into the binary so `--version` can answer what is running without
+    # anyone reading a build log.
+    VER=$(git -C "$BUILD/skysbx-panel" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-say "building"
-# GOTOOLCHAIN=local is what makes the pin real: without it Go reads the `go`
-# line in go.mod and will silently fetch and use a newer toolchain, which is
-# exactly the 1.27 that cannot link the node half.
-( cd "$BUILD/skysbx-panel" && env \
-    GOTOOLCHAIN=local GOFLAGS=-buildvcs=false CGO_ENABLED=0 GOOS=linux \
-    GOMODCACHE="$GO_MOD_CACHE" GOCACHE="$GO_BUILD_CACHE" \
-    "$GO" build -trimpath -ldflags "-s -w -X main.version=$VER" \
-        -o skysbx-panel ./cmd/panel )
-install -m 0755 "$BUILD/skysbx-panel/skysbx-panel" "$ROOT/skysbx-panel"
-ok "panel binary installed"
+    say "building"
+    # GOTOOLCHAIN=local is what makes the pin real: without it Go reads the `go`
+    # line in go.mod and will silently fetch and use a newer toolchain, which is
+    # exactly the 1.27 that cannot link the node half.
+    ( cd "$BUILD/skysbx-panel" && env \
+        GOTOOLCHAIN=local GOFLAGS=-buildvcs=false CGO_ENABLED=0 GOOS=linux \
+        GOMODCACHE="$GO_MOD_CACHE" GOCACHE="$GO_BUILD_CACHE" \
+        "$GO" build -trimpath -ldflags "-s -w -X main.version=$VER" \
+            -o skysbx-panel ./cmd/panel )
+    install -m 0755 "$BUILD/skysbx-panel/skysbx-panel" "$ROOT/skysbx-panel"
+    ok "panel binary installed"
+fi
 
 # Before the service starts, so there is never a moment where the panel is
 # reachable without an administrator. The password goes in on stdin — printf is

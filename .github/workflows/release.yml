@@ -1,0 +1,53 @@
+name: release
+
+# Publishes the binaries the installer prefers to download. Tag and push:
+#
+#     git tag v0.1.0 && git push origin v0.1.0
+#
+# Without a release the installer still works — it falls back to building from
+# source — so a tag that is never cut costs correctness nothing, only time on
+# whoever installs next.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned, and pinned to the same version the installers use. 1.27 cannot
+      # link the node half (sing-box reaches an unexported http2 field through
+      # go:linkname), and a panel built by a different toolchain than the one
+      # the source path would have used is a difference nobody wants to debug.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          check-latest: false
+
+      - name: build
+        run: |
+          set -euo pipefail
+          VER=${GITHUB_REF_NAME:-dev}
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -trimpath -ldflags "-s -w -X main.version=$VER" \
+              -o "dist/skysbx-panel-linux-$arch" ./cmd/panel
+          done
+          # The installer verifies against this file, so it has to list exactly
+          # the names it will ask for — bare, no directory component.
+          cd dist && sha256sum skysbx-panel-linux-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/skysbx-panel-linux-amd64
+            dist/skysbx-panel-linux-arm64
+            dist/SHA256SUMS
