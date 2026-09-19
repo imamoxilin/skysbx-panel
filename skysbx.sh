@@ -16,6 +16,10 @@
 #
 # It does no installing itself. Each choice hands over to the installer that
 # owns that half, which is where the real work and the real documentation are.
+#
+# Messages are in Chinese because that is who runs this. Comments stay in
+# English: they are for whoever changes the script, not whoever runs it. The
+# subcommands stay in English too — they are an interface other scripts type.
 set -eu
 
 PANEL_RAW=${SKYSBX_PANEL_RAW:-https://raw.githubusercontent.com/kosje/skysbx-panel/main}
@@ -25,8 +29,8 @@ ROOT=${SKYSBX_ROOT:-/opt/skysbx}
 RED=$(printf '\033[31m'); GRN=$(printf '\033[32m'); YLW=$(printf '\033[33m')
 BLD=$(printf '\033[1m');  DIM=$(printf '\033[2m'); RST=$(printf '\033[0m')
 say()  { printf '%s==>%s %s\n' "$GRN" "$RST" "$*"; }
-warn() { printf '%s warn%s %s\n' "$YLW" "$RST" "$*"; }
-die()  { printf '%s fail%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
+warn() { printf '%s 警告%s %s\n' "$YLW" "$RST" "$*"; }
+die()  { printf '%s 错误%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 
 have_panel() { [ -x "$ROOT/skysbx-panel" ]; }
 have_node()  { [ -x "$ROOT/skysbx-node" ]; }
@@ -41,9 +45,9 @@ run_installer() {
     tmp=$(mktemp)
     if ! wget -qO- "$url" > "$tmp" 2>/dev/null && ! curl -fsSL "$url" -o "$tmp"; then
         rm -f "$tmp"
-        die "cannot download $url"
+        die "无法下载 $url"
     fi
-    [ -s "$tmp" ] || { rm -f "$tmp"; die "downloaded nothing from $url"; }
+    [ -s "$tmp" ] || { rm -f "$tmp"; die "从 $url 下载到的是空文件"; }
     sh "$tmp" "$@"
     rc=$?
     rm -f "$tmp"
@@ -61,15 +65,15 @@ show_version() {
     any=0
     if have_panel; then "$ROOT/skysbx-panel" -version 2>/dev/null || true
         systemctl is-active --quiet skysbx-panel \
-            && printf '  panel service running\n' || printf '  panel service stopped\n'
+            && printf '  面板服务：运行中\n' || printf '  面板服务：已停止\n'
         any=1
     fi
     if have_node; then "$ROOT/skysbx-node" -version 2>/dev/null || true
         systemctl is-active --quiet skysbx-node \
-            && printf '  node service running\n' || printf '  node service stopped\n'
+            && printf '  节点服务：运行中\n' || printf '  节点服务：已停止\n'
         any=1
     fi
-    [ "$any" = 1 ] || printf 'Nothing is installed at %s\n' "$ROOT"
+    [ "$any" = 1 ] || printf '%s 下没有安装任何组件\n' "$ROOT"
 }
 
 # ──────────────────────────── choosing a half ──────────────────────────────
@@ -78,6 +82,7 @@ show_version() {
 # nothing to ask. On a host with both, never assume: "uninstall" means a
 # database to one half and a certificate to the other, and doing both because
 # the answer was obvious to the script is how a database goes missing.
+#
 # Prompts go to the terminal, not to stdout: the caller reads this function's
 # stdout to learn which half was chosen, so anything printed there is swallowed
 # into that variable instead of being shown. Asking a question nobody can see is
@@ -86,8 +91,8 @@ pick_half() {
     action=$1
     if have_panel && have_node; then
         {
-            printf '\n  Both halves are installed here. %s which?\n' "$action"
-            printf '    1  panel\n    2  node\n    0  cancel\n'
+            printf '\n  这台机器上两半都装了，要%s哪一个？\n' "$action"
+            printf '    1  面板\n    2  节点\n    0  取消\n'
             printf '  > '
         } >/dev/tty
         read -r h </dev/tty || h=0
@@ -103,15 +108,18 @@ pick_half() {
     echo ""
 }
 
+# The word to type stays "purge", not a Chinese one: this is the moment to make
+# someone stop and act deliberately, and switching input methods to answer is
+# how a deliberate confirmation turns into a fumbled one.
 confirm_purge() {
     half=$1
     case "$half" in
-      panel) what="the database — every user, node and subscription" ;;
-      node)  what="this node's certificate and its environment file" ;;
+      panel) what="数据库 —— 所有用户、节点和订阅" ;;
+      node)  what="这个节点的证书和它的环境文件" ;;
     esac
-    printf '\n%s  purge deletes %s.%s\n' "$RED" "$what" "$RST"
-    printf '  There is no undo and no copy anywhere else.\n'
-    printf '  Type %spurge%s to go ahead: ' "$BLD" "$RST"
+    printf '\n%s  清除会删掉%s。%s\n' "$RED" "$what" "$RST"
+    printf '  没有撤销，别处也没有副本。\n'
+    printf '  确定就输入 %spurge%s：' "$BLD" "$RST"
     read -r answer </dev/tty || answer=""
     [ "$answer" = purge ]
 }
@@ -119,9 +127,15 @@ confirm_purge() {
 lifecycle() {
     action=$1
     half=${2:-}
+    case "$action" in
+        upgrade)   action_cn=升级 ;;
+        uninstall) action_cn=卸载 ;;
+        purge)     action_cn=清除 ;;
+        *)         action_cn=$action ;;
+    esac
     if [ -z "$half" ]; then
-        half=$(pick_half "$action")
-        [ -n "$half" ] || { say "cancelled"; return 0; }
+        half=$(pick_half "$action_cn")
+        [ -n "$half" ] || { say "已取消"; return 0; }
     fi
     case "$action" in
         upgrade)
@@ -129,7 +143,7 @@ lifecycle() {
         uninstall)
             case "$half" in panel) panel --uninstall ;; node) node --uninstall ;; esac ;;
         purge)
-            confirm_purge "$half" || { say "cancelled — nothing was deleted"; return 0; }
+            confirm_purge "$half" || { say "已取消 —— 什么都没有删除"; return 0; }
             case "$half" in panel) panel --purge ;; node) node --purge ;; esac ;;
     esac
 }
@@ -137,10 +151,10 @@ lifecycle() {
 # ─────────────────────────────────── menu ──────────────────────────────────
 
 state_line() {
-    if have_panel && have_node; then printf 'panel and node'
-    elif have_panel; then printf 'panel'
-    elif have_node; then printf 'node'
-    else printf 'nothing yet'
+    if have_panel && have_node; then printf '面板和节点'
+    elif have_panel; then printf '面板'
+    elif have_node; then printf '节点'
+    else printf '尚未安装'
     fi
 }
 
@@ -148,24 +162,24 @@ menu() {
     installed=0
     { have_panel || have_node; } && installed=1
 
-    printf '\n%sskysbx%s   %son this host: %s%s\n\n' \
+    printf '\n%sskysbx%s   %s本机已装：%s%s\n\n' \
         "$BLD" "$RST" "$DIM" "$(state_line)" "$RST"
 
     if [ "$installed" = 0 ]; then
-        printf '  1  Install the panel\n'
-        printf '  2  Install a node\n'
-        printf '  3  Install both, here\n'
+        printf '  1  安装面板\n'
+        printf '  2  安装节点\n'
+        printf '  3  在这台机器上同时安装两者\n'
     else
         # Installing over something already here is how two panels end up
         # fighting over port 443, so the installed case leads with maintenance.
-        printf '  1  Version\n'
-        printf '  2  Upgrade\n'
-        printf '  3  Uninstall      %skeeps the data%s\n' "$DIM" "$RST"
-        printf '  4  Purge          %sdeletes the data%s\n' "$DIM" "$RST"
-        have_panel || printf '  5  Add the panel here\n'
-        have_node  || printf '  5  Add a node here\n'
+        printf '  1  查看版本\n'
+        printf '  2  升级\n'
+        printf '  3  卸载        %s保留数据%s\n' "$DIM" "$RST"
+        printf '  4  清除        %s删除数据%s\n' "$DIM" "$RST"
+        have_panel || printf '  5  在这台机器上加装面板\n'
+        have_node  || printf '  5  在这台机器上加装节点\n'
     fi
-    printf '  0  Quit\n\n  > '
+    printf '  0  退出\n\n  > '
 
     read -r choice </dev/tty || choice=0
     printf '\n'
@@ -175,8 +189,8 @@ menu() {
             1) panel ;;
             2) node ;;
             3) both ;;
-            0|"") say "nothing done" ;;
-            *) die "no such choice: $choice" ;;
+            0|"") say "什么都没做" ;;
+            *) die "没有这个选项：$choice" ;;
         esac
     else
         case "$choice" in
@@ -187,28 +201,27 @@ menu() {
             # An if, not `have_panel && node || panel`: that runs the panel
             # installer as well whenever the node installer exits non-zero.
             5) if have_panel; then node; else panel; fi ;;
-            0|"") say "nothing done" ;;
-            *) die "no such choice: $choice" ;;
+            0|"") say "什么都没做" ;;
+            *) die "没有这个选项：$choice" ;;
         esac
     fi
 }
 
 usage() {
     cat <<EOF
-skysbx — install and maintain skysbx on this host
+skysbx —— 在这台机器上安装和维护 skysbx
 
-  skysbx                              the menu
-  skysbx install panel|node|both      ... plus any installer options
-  skysbx version                      what is installed here
-  skysbx upgrade   [panel|node]
-  skysbx uninstall [panel|node]       keeps the data
-  skysbx purge     [panel|node]       deletes the data
+  skysbx                              打开菜单
+  skysbx install panel|node|both      安装，后面可直接跟安装器的参数
+  skysbx version                      这台机器上装了什么
+  skysbx upgrade   [panel|node]       升级
+  skysbx uninstall [panel|node]       卸载，保留数据
+  skysbx purge     [panel|node]       清除，删除数据
 
-On a host with both halves, the lifecycle commands ask which one if you do not
-say. They are never applied to both at once: "uninstall" means a database to
-one half and a certificate to the other.
+两半都装在同一台机器上时，上面几个动作如果没写是哪一半，会先问你。它们不会一次对两半
+执行：「卸载」对有数据库的面板和对有证书的节点，不是同一个承诺。
 
-Installer options pass straight through, so this is still the way in:
+安装器的参数原样透传，所以这仍然是完整的入口：
 
   skysbx install both --domain panel.example.com --cf-token <token>
 EOF
@@ -222,7 +235,7 @@ case "${1:-}" in
     -h|--help|help) usage; exit 0 ;;
 esac
 
-[ "$(id -u)" = 0 ] || die "run as root"
+[ "$(id -u)" = 0 ] || die "请用 root 运行"
 
 case "${1:-}" in
     version)   show_version; exit 0 ;;
@@ -233,7 +246,7 @@ case "${1:-}" in
             panel) panel "$@" ;;
             node)  node "$@" ;;
             both)  both "$@" ;;
-            *) usage; die "install what? panel, node or both" ;;
+            *) usage; die "要安装什么？panel、node 或 both" ;;
         esac
         exit 0 ;;
     upgrade|uninstall|purge)
@@ -242,17 +255,17 @@ case "${1:-}" in
         case "$half" in
             panel|node) ;;
             "") ;;
-            *) usage; die "not a half: $half" ;;
+            *) usage; die "不是有效的组件名：$half（只能是 panel 或 node）" ;;
         esac
         # Naming the half is what makes this scriptable; leaving it out is what
         # needs a terminal, because that is when there is a question to ask.
         if [ -z "$half" ] && have_panel && have_node && ! [ -t 0 ]; then
-            die "$action which half? this host has both, and there is no terminal to ask on"
+            die "要对哪一半执行 $action？这台机器两半都装了，而当前没有终端可以询问"
         fi
         lifecycle "$action" "$half"
         exit 0 ;;
     "") ;;
-    *) usage; die "unknown command: $1" ;;
+    *) usage; die "无法识别的命令：$1" ;;
 esac
 
 # The menu needs a keyboard. Piped in from the web, stdin is the downloaded
@@ -260,6 +273,6 @@ esac
 # one gets told what to type instead of a prompt that can never be answered.
 if ! ( exec 3>/dev/tty ) 2>/dev/null; then
     usage
-    die "no terminal for the menu; give a command instead"
+    die "没有终端，菜单无法使用；请直接给出命令"
 fi
 menu
