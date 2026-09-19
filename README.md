@@ -50,6 +50,39 @@ sing-box 原生配置，不做格式转译。密钥、short id、SS 服务端 PS
 
 ## 安装
 
+### 一条命令，剩下的选就行
+
+不想记哪个 URL 对应哪一半的话，用这个：
+
+```bash
+wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/skysbx.sh | sudo sh
+```
+
+它会按**这台机器的现状**给菜单：什么都没装就列三种安装方式；已经装了就直接列维护动作
+（版本 / 升级 / 卸载 / 清除），并且只列出还能加的那一半。
+
+装完会在 `/usr/local/bin/skysbx` 留一份，之后维护就是一个词：
+
+```bash
+skysbx                       # 菜单
+skysbx version               # 这台机器上装了什么
+skysbx upgrade   [panel|node]
+skysbx uninstall [panel|node]   # 保留数据
+skysbx purge     [panel|node]   # 删除数据
+skysbx install both --domain panel.example.com --cf-token <token>
+```
+
+菜单里的每一项都有对应的直接命令（菜单在脚本里没法用），安装参数原样透传。
+
+**两件它刻意不做的事**：
+
+- **不会一次对两半执行卸载或清除。** 同机装了两半时它会问是哪一半——「卸载」对有数据库的
+  面板和对有证书的节点是两个不同的承诺。
+- **purge 不接受一次按键。** 菜单里 `4` 和 `3` 只差一个手指，所以清除会先说清楚将要删掉
+  什么，再要求你把 `purge` 这个词打出来。
+
+下面是各自的直接安装方式，和上面等价。
+
 ### 面板
 
 ```bash
