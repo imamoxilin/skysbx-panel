@@ -1,11 +1,14 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/caddyserver/certmagic"
 )
@@ -101,4 +104,90 @@ func (a *AutoTLS) TLSConfig() *tls.Config {
 	cfg := a.cfg.TLSConfig()
 	cfg.NextProtos = append([]string{"h2", "http/1.1"}, cfg.NextProtos...)
 	return cfg
+}
+
+// ExportTo copies the managed certificate and its key to two fixed paths.
+//
+// This exists for the one-host case: AnyTLS is the only protocol that needs a
+// certificate, and on a machine where the panel already holds port 80 there is
+// no way for the node to run certbot's standalone challenge and get its own.
+// The panel's certificate is for the same name the node is reached on, so it is
+// the right certificate — it is only in the wrong place.
+//
+// The wrong place is not a stable one either: certmagic's layout puts the
+// issuer's directory in the path, and that changes if the CA does (a fallback
+// to a staging endpoint is enough). So rather than teach the node that layout,
+// the panel writes the pair where the node already looks by default.
+//
+// sing-box watches both files and reloads them, so renewal is handled by
+// rewriting them here — no restart, no config push. Writing the key first and
+// the certificate second is deliberate: the watcher fires per file and pairs
+// whatever it has, so the last write should be the one that completes a
+// matching pair. Either order logs one "reload key pair" error in between; this
+// order makes that the only cost.
+func (a *AutoTLS) ExportTo(ctx context.Context, certPath, keyPath string) error {
+	certPEM, keyPEM, err := a.currentPEM(ctx)
+	if err != nil {
+		return err
+	}
+	if err := writeIfChanged(keyPath, keyPEM, 0o600); err != nil {
+		return err
+	}
+	return writeIfChanged(certPath, certPEM, 0o644)
+}
+
+// currentPEM digs the PEM pair out of certmagic's storage.
+//
+// It lists rather than building the key from a known issuer, because the issuer
+// segment is exactly the part that is not ours to predict.
+func (a *AutoTLS) currentPEM(ctx context.Context) (cert, key []byte, err error) {
+	keys, err := a.cfg.Storage.List(ctx, "certificates", true)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list certificate storage: %w", err)
+	}
+	certKey, keyKey := "", ""
+	for _, k := range keys {
+		// FileStorage hands back whatever separator the host filesystem uses,
+		// so matching on "/" alone finds nothing on Windows. The key is still
+		// passed to Load unchanged — only the comparison is normalised.
+		norm := strings.ReplaceAll(k, `\`, "/")
+		switch {
+		case strings.HasSuffix(norm, "/"+a.domain+".crt"):
+			certKey = k
+		case strings.HasSuffix(norm, "/"+a.domain+".key"):
+			keyKey = k
+		}
+	}
+	if certKey == "" || keyKey == "" {
+		return nil, nil, fmt.Errorf("no stored certificate for %s yet", a.domain)
+	}
+	if cert, err = a.cfg.Storage.Load(ctx, certKey); err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", certKey, err)
+	}
+	if key, err = a.cfg.Storage.Load(ctx, keyKey); err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", keyKey, err)
+	}
+	return cert, key, nil
+}
+
+// writeIfChanged avoids touching a file whose content already matches, so the
+// watcher on the other side is not woken for nothing — an export that ran on a
+// timer would otherwise make sing-box reload its certificate every hour for the
+// ninety days between renewals.
+//
+// The write goes through a temporary file and a rename so a reader never sees a
+// half-written certificate: rename is atomic, and the watcher fires once.
+func writeIfChanged(path string, want []byte, mode os.FileMode) error {
+	if have, err := os.ReadFile(path); err == nil && bytes.Equal(have, want) {
+		return nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, want, mode); err != nil {
+		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename onto %s: %w", path, err)
+	}
+	return nil
 }

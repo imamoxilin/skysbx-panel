@@ -176,9 +176,11 @@ ADMIN_USER=${ADMIN_USER:-admin}
 [ "${#ADMIN_PASS}" -ge 12 ] || die "the administrator password must be at least 12 characters"
 
 if [ -z "$CF_TOKEN" ]; then
-    warn "no --cf-token: this node will have no certificate."
-    warn "Reality and Shadowsocks work without one; AnyTLS does not. certbot's"
-    warn "standalone mode cannot be used here because the panel holds port 80."
+    warn "no --cf-token: this node gets no certificate of its own."
+    warn "certbot's standalone mode cannot be used here — the panel holds port 80."
+    warn "The panel will instead share its own certificate with the node, so"
+    warn "AnyTLS still works: it is issued for the same name the node is reached"
+    warn "on. Leave an AnyTLS inbound's certificate paths empty to use it."
 fi
 
 # ─────────────────────────────── the panel ────────────────────────────────
@@ -191,6 +193,15 @@ PANEL_ARGS=(--domain "$DOMAIN")
 # installer never to look for a published binary — which is how the download
 # path ended up unreachable from here even though both halves supported it.
 [ "$PANEL_SRC_GIVEN" = 1 ] && PANEL_ARGS+=(--src "$PANEL_SRC")
+# Without a Cloudflare token the node cannot get a certificate of its own —
+# certbot's standalone challenge wants port 80 and the panel has it — so AnyTLS
+# would be unusable on this host. The panel's certificate is for the same name
+# the node is reached on, so it is the right one; the panel is told to write it
+# where the node's AnyTLS inbounds already look. With --cf-token the node gets
+# its own over DNS-01 and the panel must not overwrite it.
+if [ -z "$CF_TOKEN" ]; then
+    PANEL_ARGS+=(--export-cert)
+fi
 
 SKYSBX_ADMIN_USER="$ADMIN_USER" SKYSBX_ADMIN_PASSWORD="$ADMIN_PASS" \
     SKYSBX_LAUNCHER_SRC="$PANEL_SRC" \

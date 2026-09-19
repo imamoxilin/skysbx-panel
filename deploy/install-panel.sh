@@ -14,6 +14,9 @@ GH_TOKEN=${GITHUB_TOKEN:-}
 GH_OWNER=${SKYSBX_GH_OWNER:-kosje}
 REF=${SKYSBX_REF:-main}
 FROM_SOURCE=0
+# Set when a node shares this host: the panel then writes its certificate to
+# cert.pem/key.pem, which is where the node's AnyTLS inbounds look by default.
+EXPORT_CERT=0
 # Empty means whatever the newest release is. Pin it to reinstall the exact
 # version a working host is already running.
 SKYSBX_VERSION=${SKYSBX_VERSION:-}
@@ -51,6 +54,9 @@ Install options
   --email <addr>    Contact address for Let's Encrypt (recommended).
   --src <dir>       Build from a checkout already on disk instead of cloning.
   --from-source     Build from source instead of downloading a published binary.
+  --export-cert     Also write the certificate to cert.pem/key.pem, so a node
+                    on this same host can serve AnyTLS with it. Only for that
+                    case: it overwrites whatever is at those two paths.
   -h, --help        This text.
 
 Ports 80 and 443 must be free: the panel terminates its own TLS and answers the
@@ -68,6 +74,7 @@ while [ $# -gt 0 ]; do
         --email)     EMAIL=$2; shift 2 ;;
         --src)       SRC_DIR=$2; shift 2 ;;
         --from-source) FROM_SOURCE=1; shift ;;
+        --export-cert) EXPORT_CERT=1; shift ;;
         -h|--help)   usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -154,6 +161,12 @@ if [ "$ACTION" = upgrade ]; then
     if [ -f "$ROOT/panel.env" ]; then
         DOMAIN=${DOMAIN:-$(sed -n 's/^SKYSBX_DOMAIN=//p' "$ROOT/panel.env")}
         EMAIL=${EMAIL:-$(sed -n 's/^SKYSBX_ACME_EMAIL=//p' "$ROOT/panel.env")}
+        # Carried across upgrades: a node on this host is relying on the export,
+        # and silently dropping it would leave AnyTLS serving an expiring
+        # certificate until someone noticed.
+        [ "$EXPORT_CERT" = 1 ] || EXPORT_CERT=$(sed -n 's/^SKYSBX_EXPORT_CERT=//p' \
+            "$ROOT/panel.env" 2>/dev/null | head -1)
+        EXPORT_CERT=${EXPORT_CERT:-0}
     elif [ -f /etc/systemd/system/skysbx-panel.service ]; then
         DOMAIN=${DOMAIN:-$(sed -n 's/.*--domain \([^ ]*\).*/\1/p' \
             /etc/systemd/system/skysbx-panel.service | head -1)}
@@ -478,6 +491,7 @@ say "service"
 cat > "$ROOT/panel.env" <<EOF
 SKYSBX_DOMAIN=${DOMAIN}
 SKYSBX_ACME_EMAIL=${EMAIL}
+SKYSBX_EXPORT_CERT=${EXPORT_CERT}
 EOF
 chmod 600 "$ROOT/panel.env"
 
@@ -490,6 +504,8 @@ chmod 600 "$ROOT/panel.env"
 # default that WorkingDirectory happened to resolve to the same file.
 ACME_EMAIL_FLAG=""
 [ -n "$EMAIL" ] && ACME_EMAIL_FLAG="--acme-email $EMAIL"
+EXPORT_CERT_FLAG=""
+[ "$EXPORT_CERT" = 1 ] && EXPORT_CERT_FLAG="--export-cert"
 
 cat > /etc/systemd/system/skysbx-panel.service <<EOF
 [Unit]
@@ -500,7 +516,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${ROOT}
-ExecStart=${ROOT}/skysbx-panel --domain ${DOMAIN} ${ACME_EMAIL_FLAG} --db ${ROOT}/skysbx.db
+ExecStart=${ROOT}/skysbx-panel --domain ${DOMAIN} ${ACME_EMAIL_FLAG} ${EXPORT_CERT_FLAG} --db ${ROOT}/skysbx.db
 Restart=always
 RestartSec=3
 
