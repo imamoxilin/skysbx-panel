@@ -683,6 +683,23 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 - **登出不使 cookie 失效**（已修复）：会话签名载荷现在包含世代号（`settings.web.session_generation`），登出时递增。旧 cookie 因世代号不匹配而被拒绝。测试：`internal/web/session_generation_test.go`（2 个用例）。
 - **首次 setup 窗口**（已修复）：面板首次启动时写入一个 10 分钟的 deadline（`settings.web.setup_deadline`），过期后 `/setup` 返回 403。一键安装因在启动前创建 admin 而不受影响。测试：`internal/web/setup_window_test.go`（5 个用例）。
 
+### 11.7 安装时的二进制来源
+
+安装器先尝试取已发布的构建，取不到才编译。两条路都必须可用，因为发布覆盖不了所有情况。
+
+- 地址用 `releases/latest/download/<asset>`，GitHub 自己解析到最新发布 —— 不调 API，
+  就没有速率限制，也不用在 shell 里解 JSON。`SKYSBX_VERSION` 钉住某个 tag。
+- **尝试下载发生在克隆源码之前。** 先克隆整个 sing-box 再发现不用编译，是纯粹的浪费。
+- **回落条件**：没有发布、架构没覆盖、连不上 CDN、或 `--from-source`。
+- **校验和不匹配不回落，而是停止安装。** 一个和自己 `SHA256SUMS` 不一致的发布是异常，
+  静默绕过它等于把唯一的信号丢掉。
+- 启动器自己克隆的那份源码通过 `SKYSBX_LAUNCHER_SRC` 传递，**不是 `--src`**。两者语义
+  不同：`--src` 是操作者说「编这份，别用发布版」。一度混用导致下载路径从合并安装器里
+  完全不可达 —— 日志里连一次「looking for a published build」都没有。
+
+实测（954MB / 1 核，全新机器，面板加节点）：下载 **25 秒**，源码编译 **338 秒**，且后者
+额外需要 264MB 工具链、编译期最低可用内存 74MB。
+
 ## 12. 单节点一起安装
 
 `deploy/install-panel-and-node.sh`（根目录还有 `install-panel-and-node.sh` 作为管道入口）把面板和节点装到
