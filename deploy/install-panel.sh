@@ -397,6 +397,16 @@ SKYSBX_ACME_EMAIL=${EMAIL}
 EOF
 chmod 600 "$ROOT/panel.env"
 
+# Written as a whole flag or not at all. An empty EMAIL used to leave
+# `--acme-email ` followed by `--db`, and Go's flag package reads the next
+# argument as the value: the ACME contact became the literal string "--db",
+# Let's Encrypt rejected it with "unable to parse email address", and the
+# panel then had no certificate — for ever, retrying in the background. The
+# database escaped only by luck, because the flag it swallowed has a relative
+# default that WorkingDirectory happened to resolve to the same file.
+ACME_EMAIL_FLAG=""
+[ -n "$EMAIL" ] && ACME_EMAIL_FLAG="--acme-email $EMAIL"
+
 cat > /etc/systemd/system/skysbx-panel.service <<EOF
 [Unit]
 Description=skysbx panel
@@ -406,7 +416,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=${ROOT}
-ExecStart=${ROOT}/skysbx-panel --domain ${DOMAIN} --acme-email ${EMAIL} --db ${ROOT}/skysbx.db
+ExecStart=${ROOT}/skysbx-panel --domain ${DOMAIN} ${ACME_EMAIL_FLAG} --db ${ROOT}/skysbx.db
 Restart=always
 RestartSec=3
 
@@ -429,13 +439,28 @@ systemctl restart skysbx-panel
 ok "systemd unit installed"
 
 printf '    waiting for a certificate '
+CERT_LIVE=0
 for _ in $(seq 1 60); do
     if curl -fsS --max-time 5 "https://$DOMAIN/login" >/dev/null 2>&1; then
         printf '\n'; ok "https://$DOMAIN is live"
+        CERT_LIVE=1
         break
     fi
     printf '.'; sleep 3
 done
+
+# Running out of that loop used to fall straight through to the success banner,
+# so an install that never got a certificate looked exactly like one that
+# worked and the first symptom was a browser that would not connect.
+if [ "$CERT_LIVE" = 0 ]; then
+    printf '\n'
+    warn "no certificate after three minutes — https://$DOMAIN will not load yet."
+    warn "The panel itself is installed and running. Usually one of:"
+    warn "  · port 80 not reachable from the internet (the ACME challenge needs it)"
+    warn "  · $DOMAIN going through a proxying CDN instead of straight to this host"
+    warn "The reason is in:  journalctl -u skysbx-panel | grep -i acme"
+    warn "certmagic keeps retrying, so fixing the cause needs no reinstall."
+fi
 
 if [ "$NEED_ADMIN" = yes ]; then
     LOGIN_LINE="Sign in  https://${DOMAIN}/login   as ${ADMIN_USER}"

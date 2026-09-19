@@ -208,7 +208,20 @@ else
     # we are already root on.
     for i in $(seq 1 30); do
         curl -sk --max-time 5 -o /dev/null "https://$DOMAIN/login" && break
-        [ "$i" = 30 ] && die "the panel did not come up at https://$DOMAIN"
+        if [ "$i" = 30 ]; then
+            # "It never started" and "it is running but has no certificate to
+            # serve" are indistinguishable from out here and lead to entirely
+            # different things to go and look at, so say which one it is.
+            if systemctl is-active --quiet skysbx-panel 2>/dev/null; then
+                die "the panel is running but is not serving TLS on https://$DOMAIN.
+  This is nearly always the certificate. To see why:
+      journalctl -u skysbx-panel | grep -i acme
+  The ACME challenge needs port 80 reachable from the internet, and the name
+  must resolve straight here — a proxying CDN in front of it will not do."
+            fi
+            die "the panel did not come up at https://$DOMAIN
+  journalctl -u skysbx-panel will say why."
+        fi
         sleep 2
     done
     ok "panel is answering"
