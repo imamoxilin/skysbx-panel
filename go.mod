@@ -1,6 +1,6 @@
 module github.com/kosje/skysbx-panel
 
-go 1.27.0
+go 1.26.5
 
 require modernc.org/sqlite v1.40.1
 

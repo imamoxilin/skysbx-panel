@@ -710,6 +710,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 | Reality 公钥由私钥推导 | 建入站时算一次存进 `client` |
 | VLESS 的 flow 两边必须一致 | 入站的 client 参数和推给该入站的每个用户都得是 `xtls-rprx-vision`，不一致会在握手时报 flow mismatch，读起来像客户端的问题 |
 | 节点构建 tag 不可省 | `with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic`；缺了能编译，启动即死。`go test` / `go vet` 同样要带 |
+| Go 必须是 1.26.x | sing-box 通过 `go:linkname` 取 http2 的未导出字段，1.27 链接失败。两个安装器都固定 1.26.5，并且必须带 `GOTOOLCHAIN=local` —— 否则 Go 会照着 go.mod 里的 `go` 行自己下载并改用更新的工具链，把这个固定悄悄绕过去 |
 | `-race` 需要 `-gcflags=all=-d=checkptr=0` | sing-box 自己的 unsafe 运算会触发 checkptr |
 | 面板机的 443 归 panel | 该机上的 Reality 要退到别的端口 |
 | 节点域名必须灰云 | 三个协议都不是 HTTP，套 CDN 全挂 |

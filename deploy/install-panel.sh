@@ -102,13 +102,15 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
         rm -f "$ROOT/panel.env"
         rm -rf "$ROOT/certs"
         rm -rf "$ROOT/go-mod-cache" "$ROOT/go-build-cache"
+        # The toolchain is shared when a node lives on this host too, so it goes
+        # only if nothing else is using it. It is a rebuildable cache either way.
+        systemctl is-enabled --quiet skysbx-node 2>/dev/null || rm -rf "$ROOT/toolchain"
         ok "database and certificates deleted"
-        if command -v docker >/dev/null 2>&1; then
-            docker image rm golang:1.27 >/dev/null 2>&1 \
-                && ok "build image removed" || true
-        fi
+        # Only ever true on a host set up by an older version of this script,
+        # which installed Docker to build in. Nothing installs it any more, but
+        # leaving a daemon behind that we put there would be rude.
         if [ -f "$ROOT/.docker-installed-by-skysbx" ] && command -v docker >/dev/null 2>&1; then
-            say "removing docker (this script installed it)"
+            say "removing docker (an older version of this script installed it)"
             systemctl disable --now docker docker.socket containerd >/dev/null 2>&1 || true
             apt-get purge -y -qq docker-ce docker-ce-cli containerd.io \
                 docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1 || true
@@ -305,24 +307,62 @@ fi
 # fails on "bad interpreter".
 find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
-if ! command -v docker >/dev/null; then
-    say "installing docker (used only to build; nothing runs in it)"
-    curl -fsSL https://get.docker.com | sh >/dev/null
-    # Remembered so --purge can remove Docker again without guessing. A host
-    # that already had it is running something in it.
-    touch "$ROOT/.docker-installed-by-skysbx"
-fi
+# ────────────────────────────── go toolchain ──────────────────────────────
+#
+# Go is needed to build and for nothing else. This used to install Docker for
+# it: a package repository, a daemon and a ~350MB image, to run one compiler
+# once. The official tarball is 64MB, leaves nothing running, and unpacks
+# inside $ROOT where --purge already looks.
+#
+# 1.26.x is not a preference. sing-box reaches an unexported http2 field
+# through go:linkname and 1.27 refuses to link it, so the node is pinned to
+# 1.26.x; pinning the panel to the same version means a host running both
+# downloads one toolchain instead of two.
+GO_VERSION=1.26.5
+GO_SHA256_amd64=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+GO_SHA256_arm64=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
+
+ensure_go() {
+    GO="$ROOT/toolchain/go/bin/go"
+    if [ -x "$GO" ] && "$GO" version 2>/dev/null | grep -q "go$GO_VERSION "; then
+        ok "go $GO_VERSION already unpacked"
+        return
+    fi
+    case $(uname -m) in
+        x86_64|amd64)  go_arch=amd64; go_sha=$GO_SHA256_amd64 ;;
+        aarch64|arm64) go_arch=arm64; go_sha=$GO_SHA256_arm64 ;;
+        *) die "unsupported architecture: $(uname -m)" ;;
+    esac
+    say "fetching go $GO_VERSION ($go_arch)"
+    mkdir -p "$ROOT/toolchain"
+    go_tgz="$ROOT/toolchain/go.tar.gz"
+    curl -fsSL -o "$go_tgz" "https://go.dev/dl/go$GO_VERSION.linux-$go_arch.tar.gz" \
+        || die "could not download the go toolchain"
+    # A tarball unpacked as root is not something to wave through unverified.
+    printf '%s  %s\n' "$go_sha" "$go_tgz" | sha256sum -c - >/dev/null 2>&1 \
+        || die "the go tarball failed its checksum — refusing to unpack it"
+    rm -rf "$ROOT/toolchain/go"
+    tar -C "$ROOT/toolchain" -xzf "$go_tgz"
+    rm -f "$go_tgz"
+    [ -x "$GO" ] || die "the go toolchain did not unpack as expected"
+    ok "go $GO_VERSION ready"
+}
+
+ensure_go
 
 # Stamped into the binary so `--version` can answer what is running without
 # anyone reading a build log.
 VER=$(git -C "$BUILD/skysbx-panel" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 say "building"
-docker run --rm -v "$BUILD/skysbx-panel:/src" -w /src \
-    -v "$GO_MOD_CACHE:/go/pkg/mod" -v "$GO_BUILD_CACHE:/root/.cache/go-build" \
-    -e GOFLAGS=-buildvcs=false -e CGO_ENABLED=0 -e GOOS=linux \
-    golang:1.27 \
-    go build -trimpath -ldflags "-s -w -X main.version=$VER" -o /src/skysbx-panel ./cmd/panel
+# GOTOOLCHAIN=local is what makes the pin real: without it Go reads the `go`
+# line in go.mod and will silently fetch and use a newer toolchain, which is
+# exactly the 1.27 that cannot link the node half.
+( cd "$BUILD/skysbx-panel" && env \
+    GOTOOLCHAIN=local GOFLAGS=-buildvcs=false CGO_ENABLED=0 GOOS=linux \
+    GOMODCACHE="$GO_MOD_CACHE" GOCACHE="$GO_BUILD_CACHE" \
+    "$GO" build -trimpath -ldflags "-s -w -X main.version=$VER" \
+        -o skysbx-panel ./cmd/panel )
 install -m 0755 "$BUILD/skysbx-panel/skysbx-panel" "$ROOT/skysbx-panel"
 ok "panel binary installed"
 
