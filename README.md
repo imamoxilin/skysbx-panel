@@ -145,8 +145,11 @@ wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-pane
 脚本用刚设好的管理员登录面板，自己建节点记录并取回 token。取不到时（比如面板版本较老）
 会退回来让你粘贴，不会整个装不下去。
 
-节点那边的 Cloudflare token 通过 `--cf-token` 传入，有了才能签 AnyTLS 证书
-（certbot standalone 要 80，被面板占着，DNS-01 不需要端口）。
+**AnyTLS 开箱可用**：同机时节点签不到自己的证书（certbot standalone 要 80，被面板占着），
+所以面板把自己的证书共享给它——反正是同一个域名。新建 AnyTLS 入站时**证书路径留空**即可。
+续期由面板重写文件、sing-box 监视到变化自动重载，不需要重启也不需要重推配置。
+
+想让节点持有自己的证书就传 `--cf-token`（走 DNS-01，不需要端口），这时面板不会覆盖它。
 
 参数透传给 `deploy/install-panel-and-node.sh`：
 

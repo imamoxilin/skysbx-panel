@@ -321,9 +321,9 @@ Data      ${ROOT}/skysbx.db
 Ports     80, 443   the panel (its own TLS, its own ACME)
           8443+     the node's inbounds — 443 is taken, so Reality goes on 8443
 
-Protocols $( [ -n "$CF_TOKEN" ] && echo "all three (certificate via DNS-01)" \
-             || echo "Reality and Shadowsocks. AnyTLS needs a certificate; rerun the
-          node installer with --cf-token to get one over DNS-01." )
+Protocols $( [ -n "$CF_TOKEN" ] && echo "all three (the node has its own certificate, via DNS-01)" \
+             || echo "all three. AnyTLS uses the panel's certificate, which is for
+          this same name — leave an inbound's certificate paths empty." )
 
 Next      open the panel, add an inbound to the '${NODE_NAME}' node, then a user.
 
