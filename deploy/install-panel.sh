@@ -225,8 +225,8 @@ if [ "$ACTION" = install ] && [ ! -f "$ROOT/skysbx.db" ]; then
         # No terminal means no way to ask. Refusing beats carrying on: the
         # alternative is a panel whose administrator is whoever opens /setup
         # first, which is the thing this whole block exists to prevent.
-        [ -t 0 ] || die "no terminal to ask for the administrator on.
-  Set SKYSBX_ADMIN_USER and SKYSBX_ADMIN_PASSWORD, or run the script directly:
+        [ -t 0 ] || die "当前没有终端可以询问管理员账号。
+  请设置 SKYSBX_ADMIN_USER 和 SKYSBX_ADMIN_PASSWORD，或直接运行：
     git clone https://github.com/${GH_OWNER}/skysbx-panel.git
     sudo ./skysbx-panel/deploy/install-panel.sh --domain $DOMAIN"
 
@@ -285,7 +285,7 @@ elif [ -n "$PUBLIC_IP" ] && [ "$RESOLVED" != "$PUBLIC_IP" ]; then
     warn "$DOMAIN 解析到 $RESOLVED，而本机是 $PUBLIC_IP"
     warn "ACME 的 HTTP-01 验证需要直连，请关掉任何代理（Cloudflare 请用灰云）"
     if [ -t 0 ]; then
-        printf '  continue anyway? [y/N] '
+        printf '  仍然继续吗？[y/N] '
         read -r a; [ "$a" = y ] || [ "$a" = Y ] || exit 1
     fi
 else
