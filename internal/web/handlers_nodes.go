@@ -298,6 +298,7 @@ func (s *Server) createInbound(w http.ResponseWriter, r *http.Request) {
 		Protocol:    r.FormValue("protocol"),
 		Tag:         r.FormValue("tag"),
 		Port:        port,
+		ListenIP:    strings.TrimSpace(r.FormValue("listen_ip")),
 		Address:     strings.TrimSpace(r.FormValue("address")),
 		RelayNodeID: relayNodeID,
 		RelayPort:   relayPort,
@@ -342,6 +343,7 @@ func (s *Server) inboundEditFields(data map[string]any, inbounds []*store.Inboun
 	data["EditTLS"] = tls
 	data["SNI"] = client.SNI
 	data["EditRelayNodeID"] = in.RelayNodeID
+	data["ListenIP"] = sb.Listen
 	if sb.TLS != nil {
 		data["CertPath"] = sb.TLS.CertificatePath
 		data["KeyPath"] = sb.TLS.KeyPath
@@ -380,6 +382,7 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 	relayNodeID, relayPort := relayForm(r)
 	in, err := s.svc.EditInbound(id, service.InboundEdit{
 		Port:        port,
+		ListenIP:    strings.TrimSpace(r.FormValue("listen_ip")),
 		Address:     strings.TrimSpace(r.FormValue("address")),
 		RelayNodeID: relayNodeID,
 		RelayPort:   relayPort,

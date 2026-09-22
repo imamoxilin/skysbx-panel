@@ -150,6 +150,27 @@ func TestEditingAnInboundLeavesUsersAlone(t *testing.T) {
 	}
 }
 
+func TestEditingShadowsocksListenIP(t *testing.T) {
+	svc, nodeID := editFixture(t)
+	in, err := svc.CreateInbound(nodeID, InboundSpec{
+		Protocol: store.ProtoShadowsocks, Port: 8388,
+	})
+	if err != nil {
+		t.Fatalf("create inbound: %v", err)
+	}
+	edited, err := svc.EditInbound(in.ID, InboundEdit{Port: 8388, ListenIP: "2001:db8::9"})
+	if err != nil {
+		t.Fatalf("edit inbound: %v", err)
+	}
+	sb, err := ParseConfig(edited)
+	if err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	if sb.Listen != "2001:db8::9" {
+		t.Fatalf("listen %q, want exact IPv6 address", sb.Listen)
+	}
+}
+
 func editFixture(t *testing.T) (*Service, int64) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))

@@ -22,6 +22,12 @@ type InboundSpec struct {
 	Tag      string
 	Port     int
 
+	// ListenIP is the address the Shadowsocks listener binds to. Blank keeps
+	// the historic dual-stack listener ("::"). A concrete IPv6 address is
+	// deliberately passed to sing-box unchanged, so the socket is bound only
+	// to that IPv6 address rather than to the IPv4 wildcard too.
+	ListenIP string
+
 	// VLESS+Reality: the site whose TLS handshake is borrowed. "host" or
 	// "host:port"; the port defaults to 443. It must speak TLS 1.3 and HTTP/2.
 	Handshake string
@@ -98,7 +104,15 @@ func BuildInbound(spec InboundSpec) (*store.Inbound, error) {
 	}
 
 	// "::" listens on both stacks. A node that only has IPv4 still binds.
-	in := singbox.Inbound{Tag: spec.Tag, Listen: "::", ListenPort: spec.Port}
+	listen := "::"
+	if spec.Protocol == store.ProtoShadowsocks {
+		var err error
+		listen, err = CheckListenIP(spec.ListenIP)
+		if err != nil {
+			return nil, err
+		}
+	}
+	in := singbox.Inbound{Tag: spec.Tag, Listen: listen, ListenPort: spec.Port}
 	var client ClientParams
 
 	switch spec.Protocol {
@@ -176,6 +190,23 @@ func BuildInbound(spec InboundSpec) (*store.Inbound, error) {
 		Tag: spec.Tag, Protocol: spec.Protocol, Port: spec.Port,
 		Config: string(cfgJSON), Client: string(clientJSON), Enabled: true,
 	}, nil
+}
+
+// CheckListenIP normalizes a Shadowsocks listening address. It accepts IP
+// literals only: unlike a connect address, a listener must not depend on DNS
+// at the time the node applies its configuration. An exact IPv6 literal makes
+// sing-box bind that address instead of the dual-stack wildcard, so IPv4 has
+// no listener to connect to.
+func CheckListenIP(ip string) (string, error) {
+	ip = strings.TrimSpace(ip)
+	if ip == "" {
+		return "::", nil
+	}
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return "", invalid("listen IP %q is not an IP address", ip)
+	}
+	return parsed.String(), nil
 }
 
 // newRealityKeypair returns (private, public), both base64url without padding.

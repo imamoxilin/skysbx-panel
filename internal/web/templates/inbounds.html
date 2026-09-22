@@ -53,12 +53,16 @@
       <label id="f-sni" hidden>SNI
         <input name="server_name" placeholder="{{.Node.Address}}"></label>
 
+      <label id="f-listen" hidden>监听 IP（留空 = 双栈）
+        <input name="listen_ip" inputmode="text" placeholder="例如 2001:db8::1"></label>
+
       <button>新建</button>
     </form>
     <p class="dim" style="margin:.8rem 0 0;font-size:.85rem">
       密钥、short id、Shadowsocks 的服务端 PSK 都是自动生成的。
       三个协议里只有 <strong>AnyTLS 需要证书</strong> ——
       Reality 用自己的密钥对认证，Shadowsocks 没有 TLS 层。
+      Shadowsocks 填写具体 IPv6 监听 IP 后只会绑定该 IPv6 地址，IPv4 无法连接该节点。
       证书路径留空就用安装脚本写入的位置（<code>{{.DefaultCertPath}}</code>）。<br>
       <strong>站内中转</strong>是让另一台节点开一个 L4 转发口把流量原样搬过来 ——
       不解密、不认证，协议照旧在本节点上终结，所以按用户计流量、IP 限制、活动记录
@@ -80,6 +84,7 @@ function onProto(v) {
   show('f-cert', v === 'anytls');
   show('f-key',  v === 'anytls');
   show('f-sni',  v === 'anytls');
+  show('f-listen', v === 'shadowsocks');
   var port = document.querySelector('input[name=port]');
   port.value = v === 'vless' ? 443 : (v === 'anytls' ? 8443 : 8388);
 }
@@ -139,6 +144,10 @@ onRelay();
             <label>tag<input value="{{.Tag}}" disabled style="opacity:.5"></label>
             <label>端口<input name="port" type="number" min="1" max="65535" required
                    value="{{.Port}}" style="min-width:6rem"></label>
+            {{if eq .Protocol "shadowsocks"}}
+              <label>监听 IP（留空 = 双栈）
+                <input name="listen_ip" value="{{$.ListenIP}}" placeholder="例如 2001:db8::1"></label>
+            {{end}}
             {{/* Shown even with no candidates, disabled and saying why — see
                  the create form. A disabled select submits nothing, which is
                  the same as "no relay", so an edit here cannot silently drop
@@ -181,6 +190,7 @@ onRelay();
           <p class="dim" style="margin:.6rem 0 0;font-size:.8rem">
             Reality 密钥对、short id、Shadowsocks 服务端 PSK 都会原样保留，
             已发出去的订阅不会失效。改端口会重建监听，该节点上所有连接会断一次；
+            Shadowsocks 填写具体 IPv6 监听 IP 后只会绑定该 IPv6 地址，IPv4 无法连接；
             <strong>只改连接地址不会</strong> —— 本节点根本看不到这个字段，它只决定订阅里
             让客户端连哪里。<br>
             <strong>站内中转</strong>：选一台节点，面板会在它上面自动开一个 L4 转发口

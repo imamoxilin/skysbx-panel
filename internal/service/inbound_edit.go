@@ -18,6 +18,10 @@ import (
 type InboundEdit struct {
 	Port int
 
+	// ListenIP changes the Shadowsocks listener's bind address. Blank retains
+	// the default dual-stack "::" listener.
+	ListenIP string
+
 	// Address overrides what subscriptions point at for this inbound. Blank
 	// means the node's own address.
 	Address string
@@ -99,8 +103,13 @@ func (s *Service) EditInbound(id int64, e InboundEdit) (*store.Inbound, error) {
 		client.SNI = e.ServerName
 
 	case store.ProtoShadowsocks:
-		// Nothing but the port. The method is fixed and the server PSK is the
-		// thing that must not change.
+		listen, err := CheckListenIP(e.ListenIP)
+		if err != nil {
+			return nil, err
+		}
+		sb.Listen = listen
+		// The method is fixed and the server PSK is the thing that must not
+		// change.
 
 	default:
 		return nil, invalid("unsupported protocol %q", in.Protocol)

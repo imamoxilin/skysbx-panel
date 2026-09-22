@@ -153,6 +153,44 @@ func TestBuildShadowsocks(t *testing.T) {
 	}
 }
 
+func TestShadowsocksIPv6ListenDoesNotUseWildcard(t *testing.T) {
+	in, err := BuildInbound(InboundSpec{
+		Protocol: store.ProtoShadowsocks, Tag: "ss-ipv6", Port: 8388,
+		ListenIP: "2001:db8::8",
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	sb, err := ParseConfig(in)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if sb.Listen != "2001:db8::8" {
+		t.Fatalf("listen %q, want exact IPv6 address", sb.Listen)
+	}
+}
+
+func TestShadowsocksListenIPValidation(t *testing.T) {
+	for _, tc := range []struct {
+		ip   string
+		want string
+		ok   bool
+	}{
+		{"", "::", true},
+		{"203.0.113.8", "203.0.113.8", true},
+		{"2001:db8::8", "2001:db8::8", true},
+		{"ss.example.com", "", false},
+	}{
+		got, err := CheckListenIP(tc.ip)
+		if tc.ok && (err != nil || got != tc.want) {
+			t.Errorf("CheckListenIP(%q) = %q, %v; want %q, nil", tc.ip, got, err, tc.want)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("CheckListenIP(%q) succeeded", tc.ip)
+		}
+	}
+}
+
 func TestSplitHandshake(t *testing.T) {
 	cases := []struct {
 		in       string
