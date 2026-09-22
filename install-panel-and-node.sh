@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-line installer for the panel and a node on the same host.
 #
-#   wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/imamoxilin/skysbx-panel/main/install-panel-and-node.sh | sh
 #
 # Arguments go through to deploy/install-panel-and-node.sh after `-s --`:
 #
@@ -20,7 +20,7 @@
 # Everything real is in deploy/install-panel-and-node.sh, which is worth reading first.
 set -eu
 
-REPO=${SKYSBX_REPO:-https://github.com/kosje/skysbx-panel.git}
+REPO=${SKYSBX_REPO:-https://github.com/imamoxilin/skysbx-panel.git}
 REF=${SKYSBX_REF:-main}
 
 RED=$(printf '\033[31m'); GRN=$(printf '\033[32m'); RST=$(printf '\033[0m')
