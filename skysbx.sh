@@ -1,7 +1,7 @@
 #!/bin/sh
 # skysbx — one command to install and maintain skysbx on this host.
 #
-#   wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/skysbx.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/imamoxilin/skysbx-panel/main/skysbx.sh | sh
 #
 # With no arguments it shows a menu of whatever makes sense for this host: the
 # install choices when nothing is here yet, the lifecycle ones when something
@@ -22,7 +22,7 @@
 # subcommands stay in English too — they are an interface other scripts type.
 set -eu
 
-PANEL_RAW=${SKYSBX_PANEL_RAW:-https://raw.githubusercontent.com/kosje/skysbx-panel/main}
+PANEL_RAW=${SKYSBX_PANEL_RAW:-https://raw.githubusercontent.com/imamoxilin/skysbx-panel/main}
 NODE_RAW=${SKYSBX_NODE_RAW:-https://raw.githubusercontent.com/kosje/skysbx-node/main}
 ROOT=${SKYSBX_ROOT:-/opt/skysbx}
 
