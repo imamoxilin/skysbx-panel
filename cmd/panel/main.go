@@ -40,6 +40,9 @@ func main() {
 				"Needs ports 80 and 443, and the domain must already resolve here")
 		acmeEmail = flag.String("acme-email", "",
 			"contact address for the certificate authority (recommended)")
+		exportCert = flag.Bool("export-cert", false,
+			"copy the panel's certificate to cert.pem and key.pem beside the "+
+				"database, for a node on this same host to serve AnyTLS with")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 		setAdmin    = flag.String("set-admin", "",
 			"create or replace the administrator with this username, reading the "+
@@ -163,6 +166,42 @@ func main() {
 			log.Error("automatic TLS", "domain", *domain, "error", err)
 		} else {
 			log.Info("certificate ready", "domain", *domain)
+		}
+
+		// A node on this host cannot get its own certificate — the panel is
+		// holding the port certbot's standalone challenge needs — but it is
+		// reached on the same name, so this one is the right one. sing-box
+		// watches the two files and reloads them, so renewals arrive by being
+		// rewritten here rather than by restarting anything.
+		//
+		// On a timer as well as once now: the certificate is renewed by
+		// certmagic's own background maintenance, which does not tell us when
+		// it happens. Hourly is far more often than the ninety-day renewal
+		// needs, and costs nothing when nothing changed — the export compares
+		// before it writes, so the watcher is not woken for a rewrite of
+		// identical bytes.
+		if *exportCert {
+			dir := filepath.Dir(*dbPath)
+			certPath := filepath.Join(dir, "cert.pem")
+			keyPath := filepath.Join(dir, "key.pem")
+			export := func() {
+				if err := autoTLS.ExportTo(ctx, certPath, keyPath); err != nil {
+					log.Warn("export certificate", "error", err)
+				}
+			}
+			export()
+			go func() {
+				t := time.NewTicker(time.Hour)
+				defer t.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+						export()
+					}
+				}
+			}()
 		}
 	}
 

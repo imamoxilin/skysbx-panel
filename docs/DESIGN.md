@@ -67,7 +67,7 @@ Authorization: Bearer <node-token>
 ```
 
 `node-token` 在 panel 建节点时生成，**一次性显示，只存哈希**。没有证书交换，没有密钥
-派生。token 可以随时在节点页「换 token」。存的是 SHA-256 而不是 bcrypt，理由见 §11.1
+派生。token 可以随时在节点页「换 token」。存的是 SHA-256 而不是 bcrypt，理由见 §12.1
 —— 那不是省事，是一个未认证端点上的拒绝服务。
 
 ### 2.3 消息封装
@@ -176,7 +176,7 @@ CREATE TABLE users (
 CREATE TABLE nodes (
   id            INTEGER PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
-  token_hash    TEXT NOT NULL,              -- 接入 token 的 bcrypt，历史遗留，见 §11.1
+  token_hash    TEXT NOT NULL,              -- 接入 token 的 bcrypt，历史遗留，见 §12.1
   token_sha     TEXT UNIQUE,                -- 同一个 token 的 SHA-256，认证实际查这个
   address       TEXT NOT NULL,              -- 客户端连的地址（域名或 IP）
   country       TEXT NOT NULL DEFAULT 'XX',
@@ -683,7 +683,42 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 - **登出不使 cookie 失效**（已修复）：会话签名载荷现在包含世代号（`settings.web.session_generation`），登出时递增。旧 cookie 因世代号不匹配而被拒绝。测试：`internal/web/session_generation_test.go`（2 个用例）。
 - **首次 setup 窗口**（已修复）：面板首次启动时写入一个 10 分钟的 deadline（`settings.web.setup_deadline`），过期后 `/setup` 返回 403。一键安装因在启动前创建 admin 而不受影响。测试：`internal/web/setup_window_test.go`（5 个用例）。
 
-## 12. 工程约束
+### 11.7 安装时的二进制来源
+
+安装器先尝试取已发布的构建，取不到才编译。两条路都必须可用，因为发布覆盖不了所有情况。
+
+- 地址用 `releases/latest/download/<asset>`，GitHub 自己解析到最新发布 —— 不调 API，
+  就没有速率限制，也不用在 shell 里解 JSON。`SKYSBX_VERSION` 钉住某个 tag。
+- **尝试下载发生在克隆源码之前。** 先克隆整个 sing-box 再发现不用编译，是纯粹的浪费。
+- **回落条件**：没有发布、架构没覆盖、连不上 CDN、或 `--from-source`。
+- **校验和不匹配不回落，而是停止安装。** 一个和自己 `SHA256SUMS` 不一致的发布是异常，
+  静默绕过它等于把唯一的信号丢掉。
+- 启动器自己克隆的那份源码通过 `SKYSBX_LAUNCHER_SRC` 传递，**不是 `--src`**。两者语义
+  不同：`--src` 是操作者说「编这份，别用发布版」。一度混用导致下载路径从合并安装器里
+  完全不可达 —— 日志里连一次「looking for a published build」都没有。
+
+实测（954MB / 1 核，全新机器，面板加节点）：下载 **25 秒**，源码编译 **338 秒**，且后者
+额外需要 264MB 工具链、编译期最低可用内存 74MB。
+
+## 12. 单节点一起安装
+
+`deploy/install-panel-and-node.sh`（根目录还有 `install-panel-and-node.sh` 作为管道入口）把面板和节点装到
+同一台机器上，整个过程一次交互：
+
+- 管理员在第一个问题里给出，两个子安装器共享同一个值，不会再问第二遍。
+- 面板先装好；脚本轮询 `https://$DOMAIN/login` 直到 ACME 证书签发完毕。
+- 拿到证书后用管理员登录面板的 HTTP API，POST `/nodes` 创建这条机器的节点记录，
+  从返回的 HTML 里把 token 解出来，交给节点安装器。
+- 节点端 `--domain` 和 `--cf-token` 一起传；没有 Cloudflare token 就走 Reality 和
+  Shadowsocks，AnyTLS 的证书拿不到（certbot standalone 要 80，被面板占着）。
+- 安装完之后两边各归各的 installer 管：`--upgrade`、`--uninstall`、`--purge` 都
+  不在这里封装，因为"卸载"对一个有数据库的面板和对一个有证书的节点含义不同，
+  一个 flag 同时做两件是丢数据的捷径。
+
+两个仓库必须都能克隆（面板从 `skysbx-panel`，节点从 `skysbx-node`），所以前提
+条件和 `install.sh` 一样 —— DNS 解析到位、80/443 空闲、root。
+
+## 13. 工程约束
 
 | 约束 | 说明 |
 |---|---|
@@ -692,6 +727,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 | Reality 公钥由私钥推导 | 建入站时算一次存进 `client` |
 | VLESS 的 flow 两边必须一致 | 入站的 client 参数和推给该入站的每个用户都得是 `xtls-rprx-vision`，不一致会在握手时报 flow mismatch，读起来像客户端的问题 |
 | 节点构建 tag 不可省 | `with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic`；缺了能编译，启动即死。`go test` / `go vet` 同样要带 |
+| Go 必须是 1.26.x | sing-box 通过 `go:linkname` 取 http2 的未导出字段，1.27 链接失败。两个安装器都固定 1.26.5，并且必须带 `GOTOOLCHAIN=local` —— 否则 Go 会照着 go.mod 里的 `go` 行自己下载并改用更新的工具链，把这个固定悄悄绕过去 |
 | `-race` 需要 `-gcflags=all=-d=checkptr=0` | sing-box 自己的 unsafe 运算会触发 checkptr |
 | 面板机的 443 归 panel | 该机上的 Reality 要退到别的端口 |
 | 节点域名必须灰云 | 三个协议都不是 HTTP，套 CDN 全挂 |
@@ -699,7 +735,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 
 ---
 
-## 13. 已知限制
+## 14. 已知限制
 
 按能不能修分类，不按重要性：
 
@@ -722,7 +758,7 @@ detour 指到空的 direct 出站 —— 三条都让客户端起不来，而当
 
 ---
 
-## 14. 许可
+## 15. 许可
 
 - panel：AGPL-3.0
 - node：GPL-3.0

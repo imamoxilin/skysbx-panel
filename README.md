@@ -6,10 +6,12 @@
 WebSocket 通信。设计见 [`docs/DESIGN.md`](docs/DESIGN.md)。
 
 ```
-一个二进制 + 一个 SQLite 文件
+两个二进制 + 一个 SQLite 文件
 ```
 
-TLS 由面板自己用 ACME 处理，不需要前置反向代理。备份就是拷一个文件。
+TLS 由面板自己用 ACME 处理，不需要前置反向代理。安装器优先下载经过 SHA256 校验的
+预编译版本，只有没有匹配的发布版本时才使用源码编译；默认不需要 Docker。备份就是拷
+一个 SQLite 文件。
 
 ## 功能
 
@@ -17,9 +19,9 @@ TLS 由面板自己用 ACME 处理，不需要前置反向代理。备份就是�
 sing-box 原生配置，不做格式转译。密钥、short id、SS 服务端 PSK 全部自动生成。三个里
 只有 AnyTLS 需要证书，所以没证书的节点照样跑另外两个。
 
-**用户** —— 到期时间、流量上限、同时在线 IP 上限、备注，全部可编辑。可以按用户指定
-能用哪些入站（不是把所有协议都发给所有人）。流量清零是单独的操作，编辑表单不会覆盖
-已用流量。
+**用户** —— 到期时间、流量上限、同时在线 IP 上限、备注和流量重置规则，全部可编辑。
+可以按用户指定能用哪些入站（不是把所有协议都发给所有人）。流量清零是单独的操作，
+编辑表单不会覆盖已用流量。
 
 **每月流量重置** —— 月付套餐用的：选一个日子（或「按创建日」），到那天已用流量自动
 归零，不用每月手动清。短月自动落到月底，二月不会被跳过；面板在重置日当天没开机的话，
@@ -27,7 +29,7 @@ sing-box 原生配置，不做格式转译。密钥、short id、SS 服务端 PS
 
 **订阅** —— 一个链接，按客户端自动给 sing-box JSON / Clash YAML / base64 分享链接，
 浏览器打开则是一个带用量和一键导入的页面。客户端服务器列表里显示的别名是
-`节点 | 用户名 | 已用/总量 | 到期`。
+`入站 tag | 用户名 | 已用/总量 | 到期`；tag 通常已经包含协议和节点名，不额外重复显示节点名称。
 
 **节点** —— 节点主动外连面板，不需要开放控制端口，NAT 后面可用。接入 token 一次性
 显示、只存哈希、可随时更换。改节点名会自动同步该节点上所有入站的 tag。
@@ -44,11 +46,48 @@ sing-box 原生配置，不做格式转译。密钥、short id、SS 服务端 PS
 **用量控制** —— 每用户同时在线 IP 上限（在节点上执行，超出的地址直接断开，先连上的
 不受影响）；面板级路由策略：禁 BitTorrent、禁测速站、自定义域名黑名单。
 
+**安全** —— 安装时在服务启动前设置管理员，避免首次 `/setup` 被抢占；管理端状态变更
+请求使用 CSRF 令牌，登录和旧节点令牌校验有限流，订阅响应禁止缓存，节点 token 使用
+高熵随机值和 SHA-256 索引保存。
+
 **监控** —— 概览页按节点分列流量和 14 天曲线；每个用户一个活动页，按小时记录连接数、
 对端数、端口数、来源地址数的峰值，保留 30 天。只记形状不记去处 —— 分辨滥用靠的是
 形状，而不是某个人访问了什么。
 
 ## 安装
+
+### 一条命令，剩下的选就行
+
+不想记哪个 URL 对应哪一半的话，用这个：
+
+```bash
+wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/skysbx.sh | sudo sh
+```
+
+它会按**这台机器的现状**给菜单：什么都没装就列三种安装方式；已经装了就直接列维护动作
+（版本 / 升级 / 卸载 / 清除），并且只列出还能加的那一半。
+
+装完会在 `/usr/local/bin/skysbx` 留一份，之后维护就是一个词：
+
+```bash
+skysbx                       # 菜单
+skysbx version               # 这台机器上装了什么
+skysbx upgrade   [panel|node]
+skysbx uninstall [panel|node]   # 保留数据
+skysbx purge     [panel|node]   # 删除数据
+skysbx install both --domain panel.example.com --cf-token <token>
+```
+
+菜单和安装器面向操作者的提示均为简体中文，供脚本调用的子命令仍使用英文。菜单需要终端；通过管道或自动化运行且没有终端时，请直接给出上面的命令。菜单里的每一项都有对应的直接命令，安装参数原样透传。命令需要以 root 身份运行；同机装有面板和节点时，`upgrade`、`uninstall`、`purge` 若省略组件名会在终端里询问，没有终端则必须明确写 `panel` 或 `node`。
+
+**两件它刻意不做的事**：
+
+- **不会一次对两半执行卸载或清除。** 同机装了两半时它会问是哪一半——「卸载」对有数据库的
+  面板和对有证书的节点是两个不同的承诺。
+- **purge 不接受一次按键。** 菜单里 `4` 和 `3` 只差一个手指，所以清除会先说清楚将要删掉
+  什么，再要求你把 `purge` 这个词打出来。
+
+下面是各自的直接安装方式，和上面等价。
 
 ### 面板
 
@@ -63,7 +102,7 @@ P=https://raw.githubusercontent.com/kosje/skysbx-panel/main/install.sh
 
 wget -qO- $P | sh -s -- --domain panel.example.com --email you@example.com
 wget -qO- $P | sh -s -- --version      # 装的是哪个版本（也用来看 CDN 是否还在缓存旧版）
-wget -qO- $P | sh -s -- --upgrade      # 重新构建并重启，数据库不动
+wget -qO- $P | sh -s -- --upgrade      # 升级并重启，优先使用预编译版本，数据库不动
 wget -qO- $P | sh -s -- --uninstall    # 卸载服务，保留数据库和证书
 wget -qO- $P | sh -s -- --purge        # 连数据库和证书一起删，不可恢复
 ```
@@ -117,7 +156,7 @@ wget -qO- $N | sh -s -- --panel https://panel.example.com --token <token>
 wget -qO- $N | sh -s -- --version      # 节点版本 + 内嵌的 sing-box 版本
 wget -qO- $N | sh -s -- --upgrade      # 重新构建并重启，含 sing-box 核心升级
 wget -qO- $N | sh -s -- --uninstall    # 卸载服务，保留证书和 node.env
-wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存、脚本装的 Docker 一起清掉
+wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存和 Go 工具链一起清掉
 ```
 
 **sing-box 核心怎么升级：** 节点把 sing-box 编进自己二进制里，所以 `--upgrade` 重新
@@ -132,28 +171,54 @@ wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存、脚本装的
 
 > 节点域名必须是 **DNS-only（灰云）**。三个协议都不是 HTTP，套 CDN 会全部失效。
 
-### 同机安装面板和节点
+### 面板和节点一起装
 
-一台服务器同时跑面板和节点时，使用下面的一键命令。它会先安装面板；面板上线后，在网页的
-**节点 → 新增**创建节点并复制一次性接入 token，回到终端粘贴即可继续安装节点：
-
-```bash
-wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh | \
-  sudo sh -s -- --domain panel.example.com --email you@example.com
-```
-
-非交互环境可直接提供 token。`--panel` 默认是 `https://<面板域名>`；只有该节点要使用
-AnyTLS 时才需要 `--node-domain`（以及可选的 `--cf-token`）：
+同一台机器上同时跑面板和节点时，用一个脚本搞定：
 
 ```bash
-I=https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh
-wget -qO- "$I" | sudo sh -s -- \
-  --domain panel.example.com --token '<node-token>' \
-  --node-domain node.example.com
+wget -qO- https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh | sh
 ```
 
-同机运行时，面板占用 `80` 和 `443`；为该节点新建 Reality 入站时请选择其他端口。节点仍然
-通过 WebSocket 主动连接面板，不会额外开放控制端口。
+会问域名、管理员账号、节点名；没有终端的话设 `SKYSBX_ADMIN_USER` 和
+`SKYSBX_ADMIN_PASSWORD` 跳过。节点的接入 token **不需要手工复制** —— 面板起来之后
+脚本用刚设好的管理员登录面板，自己建节点记录并取回 token。取不到时（比如面板版本较老）
+会退回来让你粘贴，不会整个装不下去。
+
+**AnyTLS 开箱可用**：同机时节点签不到自己的证书（certbot standalone 要 80，被面板占着），
+所以面板把自己的证书共享给它——反正是同一个域名。新建 AnyTLS 入站时**证书路径留空**即可。
+续期由面板重写文件、sing-box 监视到变化自动重载，不需要重启也不需要重推配置。
+
+想让节点持有自己的证书就传 `--cf-token`（走 DNS-01，不需要端口），这时面板不会覆盖它。
+
+参数透传给 `deploy/install-panel-and-node.sh`：
+
+```bash
+P=https://raw.githubusercontent.com/kosje/skysbx-panel/main/install-panel-and-node.sh
+wget -qO- $P | sh -s -- --domain panel.example.com --email you@example.com --cf-token <token>
+```
+
+装完之后两边各归各的 installer 管，互不干扰。
+
+### 预编译发布与低配机器
+
+安装器先去取已发布的构建并校验 SHA256；取不到才编译。差别在低配机器上很明显——同一台 954MB / 1 核
+的机器，全新安装面板加节点：
+
+| | 下载 | 源码编译 |
+|---|---|---|
+| 耗时 | **25 秒** | 338 秒 |
+| 额外占用 | 无 | Go 工具链 264MB + 构建缓存 |
+| 编译时可用内存最低 | 不适用 | 74MB（靠 swap 撑住） |
+
+**回落是设计的一部分**：没有对应架构的发布、取不到 GitHub、或者你加了 `--from-source`，
+都会走编译这条路，它永远可用。`SKYSBX_VERSION=v0.1.0` 可以钉住某个版本重装。
+
+**校验和对不上会停下来，不会静默回落。** 一个和自己 `SHA256SUMS` 不一致的发布值得人去看
+一眼，不该被自动绕过。
+
+发版是打 tag 触发的（`.github/workflows/release.yml`），编 amd64 和 arm64 两个架构。
+安装器也支持 `SKYSBX_VERSION=v0.1.0` 固定版本；发布文件或 SHA256 校验不匹配时会停止，
+不会静默安装未经验证的二进制。
 
 ### 离线 / 自建镜像
 
@@ -171,8 +236,8 @@ go test ./...
 go build ./cmd/panel
 ```
 
-需要 Go 1.27+。节点那边锁 Go 1.26.x（sing-box 的 `go:linkname` 在 1.27 下链接失败），
-面板不受这个限制。
+源码构建统一锁定 Go 1.26.5，并使用 `GOTOOLCHAIN=local` 防止 Go 自动下载其它工具链。
+节点依赖的 sing-box 在 Go 1.27 下链接失败，面板和节点因此共用同一套 Go 工具链。
 
 ```
 cmd/panel/          入口
